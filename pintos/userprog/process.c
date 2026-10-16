@@ -600,9 +600,49 @@ done:
  * - argv 주소의 8바이트 정렬 확인.
  */
 static bool setup_arguments(struct intr_frame *if_, char **argv, int argc){
+	// 문자열 본체를 역순으로 스택에 복사하기
+	for (int i = argc - 1; i >= 0; i--) {
+		// 단어 길이 구하기 ('\0' 포함)
+		int len = strlen(argv[i]) + 1;
 
+		// 스택 공간 확보하기 (주소 감소)
+		if_->rsp -= len;
+
+		// 방금 만든 빈 방에 글자 복사하기
+		// 목적지: 방금 확보한 스택 방 (if_->rsp)
+		// 원본: 원래 단어가 있던 곳 (argv[i])
+		// 크기: len
+		memcpy((void *)if_->rsp, argv[i], len);
+
+		// 주소 기억해두기
+		// 원래 argv[i] 에는 '커널 메모리'의 주소가 들어있었음
+		// 유저 프로그램은 커널 메모리를 못 봄
+		// 방금 유저 스택으로 복사해온 새 주소(if_->rsp)로 argv[i]의 내용을 덮어씀
+
+		argv[i] = (char *)if_->rsp; 
+	}
+
+	while (if_->rsp % 8 != 0) {
+		if_->rsp--;
+		*(uint8_t *)if_->rsp = 0;
+	}
+
+	if_->rsp -= 8;				// 포인터 1개 (8바이트) 가 들어갈 방을 확보하기 위해, 스택을 8바이트 내림
+	*(char **)if_->rsp = 0;		// 8바이트를 0으로 덮어씀: argv[argc] 는 반드시 NULL 값 (0) 이어야 함
+
+	for (int i = argc - 1; i >= 0; i--) {
+		if_->rsp -= 8;
+		*(char **)if_->rsp = argv[i];
+	}
+
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp;
+
+	if_->rsp -= 8;
+	*(uint64_t *)if_->rsp = 0;
+
+	return true;
 }
-
 
 /* Checks whether PHDR describes a valid, loadable segment in
  * FILE and returns true if so, false otherwise. */
