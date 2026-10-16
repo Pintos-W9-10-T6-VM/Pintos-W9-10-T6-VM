@@ -219,6 +219,132 @@ process_exit (void) {
 	process_cleanup ();
 }
 
+/*
+ * TODO [YJY]: process_terminate
+ *
+ * 역할
+ * - 종료 상태를 기록한 뒤 현재 프로세스를 종료한다.
+ *
+ * 작성 / 선언 파일
+ * - 구현: pintos/userprog/process.c.
+ * - 공개 선언: pintos/include/userprog/process.h.
+ *
+ * 입력 / 출력
+ * - status: 부모에게 전달할 종료 상태.
+ * - 반환하지 않는다.
+ *
+ * 로직 / 분기
+ * 1. 현재 스레드의 exit_status에 status를 저장한다.
+ * 2. thread_exit()을 호출한다.
+ * - 실제 자원 정리와 종료 알림은 process_exit()이 담당한다.
+ *
+ * 호출
+ * - syscall.c의 syscall_handler(), SYS_EXIT 분기.
+ * - syscall.c의 sys_write(), 사용자 주소 검증 실패 분기.
+ * - process.c의 initd(), 최초 프로그램 실행 실패 분기.
+ * - 이후 사용자 예외 종료 경로도 이 종료 정책에 연결한다.
+ *
+ * 기존 함수 / 자료 사용
+ * - threads/thread.c: thread_current(), thread_exit().
+ *
+ * 주의 / 소유권
+ * - thread_exit()이 이미 process_exit()을 호출한다.
+ * - process_exit()에서 이 함수를 호출하면 재귀 종료가 된다.
+ * - 여기서 종료 메시지와 자원 정리를 중복 실행하지 않는다.
+ *
+ * 검증
+ * - exit 테스트: exit(57) 이후 사용자 코드가 실행되지 않아야 한다.
+ * - 부모의 process_wait() 반환값도 57인지 별도 확인한다.
+ * - 잘못된 사용자 접근의 종료 상태는 -1이어야 한다.
+ */
+void process_terminate(int status) NO_RETURN;
+void process_terminate(int status){
+
+}
+
+/*
+ * TODO [YJY]: child_status_create
+ *
+ * 역할
+ * - 부모와 자식이 공유할 종료 상태 객체를 생성한다.
+ *
+ * 작성 파일
+ * - pintos/userprog/process.c, static 함수.
+ *
+ * 입력 / 출력
+ * - 인자 없음.
+ * - 반환값: 초기화된 객체 주소. 할당 실패 시 NULL.
+ *
+ * 로직 / 분기
+ * 1. 객체를 동적 할당한다. 실패하면 NULL을 반환한다.
+ * 2. tid를 TID_ERROR, exit_status를 -1로 설정한다.
+ * 3. exited 세마포어를 0으로 초기화한다.
+ * 4. 참조 수 보호용 락을 초기화한다.
+ * 5. 부모 참조와 자식에게 넘길 참조를 합쳐 refs = 2로 설정한다.
+ *
+ * 호출
+ * - process.c의 process_create_initd(), thread_create() 호출 전.
+ * - 이후 process_fork()에서도 같은 규칙으로 재사용한다.
+ *
+ * 기존 함수 / 자료 사용
+ * - threads/malloc.c: malloc().
+ * - threads/synch.c: sema_init(), lock_init().
+ *
+ * 소유권
+ * - 성공하면 부모와 자식에게 참조 하나씩을 예약한다.
+ * - 자식 생성 실패 시 호출자가 예약한 두 참조를 모두 놓아야 한다.
+ *
+ * 검증
+ * - 초기 프로세스 생성 및 정상 종료.
+ * - 자식 생성 실패 시 객체·명령어·시작 정보 누수 여부 확인.
+ */
+static struct child_status *child_status_create(void);
+static struct child_status *child_status_create(void){
+
+}
+
+/*
+ * TODO [YJY]: child_status_put
+ *
+ * 역할
+ * - 종료 상태 객체의 참조 하나를 내려놓고 마지막 참조이면 해제한다.
+ *
+ * 작성 파일
+ * - pintos/userprog/process.c, static 함수.
+ *
+ * 입력 / 출력
+ * - status: 호출자가 참조 하나를 보유한 종료 상태 객체.
+ * - 반환값 없음.
+ *
+ * 로직 / 분기
+ * 1. ref_lock을 획득한다.
+ * 2. 참조 수를 1 감소시키고 마지막 참조인지 저장한다.
+ * 3. 락을 해제한다.
+ * 4. 마지막 참조였다면 객체를 해제한다.
+ *
+ * 호출
+ * - process_wait(): 종료 상태를 읽은 뒤 부모 참조 반납.
+ * - process_exit(): 자식 종료 알림 뒤 자신의 자식 측 참조 반납.
+ * - process_exit(): 기다리지 않은 자식들의 부모 측 참조 반납.
+ * - 생성 실패 정리 경로: 넘기지 못한 예약 참조 반납.
+ *
+ * 기존 함수 / 자료 사용
+ * - threads/synch.c: lock_acquire(), lock_release().
+ * - threads/malloc.c: free().
+ *
+ * 주의 / 소유권
+ * - 호출 후에는 반납한 참조를 통해 객체에 접근하지 않는다.
+ * - 해제할 객체 안의 락을 잡은 상태로 free()하지 않는다.
+ *
+ * 검증
+ * - 자식이 먼저 종료한 경우와 부모가 먼저 기다린 경우 모두 확인.
+ * - 이후 부모 선종료·미대기 자식 시나리오에서도 누수가 없어야 한다.
+ */
+static void child_status_put(struct child_status *status);
+static void child_status_put(struct child_status *status){
+	
+}
+
 /* Free the current process's resources. */
 static void
 process_cleanup (void) {
@@ -423,6 +549,58 @@ done:
 	/* We arrive here whether the load is successful or not. */
 	file_close (file);
 	return success;
+}
+
+/*
+ * TODO [YJH]: setup_arguments
+ *
+ * 역할
+ * - 커널에 있는 인자 문자열을 사용자 스택으로 복사하고,
+ *   사용자 프로그램의 argc, argv, rsp를 설정한다.
+ *
+ * 작성 파일
+ * - pintos/userprog/process.c
+ * - 이 파일에서만 사용하므로 static 함수.
+ *
+ * 입력 / 출력
+ * - if_: load()가 실행 주소와 사용자 스택을 준비한 실행 문맥.
+ * - argv: 커널에 있는 인자 문자열 주소 배열.
+ * - argc: 프로그램 이름을 포함한 인자 개수.
+ * - 반환값: 스택 구성이 성공하면 true, 공간이 부족하면 false.
+ *
+ * 로직 / 분기
+ * 1. 문자열, 정렬 여백, argv 배열, NULL, 가짜 반환 주소의
+ *    총 크기가 준비된 사용자 스택 한 페이지에 들어가는지 확인한다.
+ * 2. 각 문자열을 사용자 스택에 복사한다.
+ * 3. argv의 각 항목을 복사된 문자열의 사용자 주소로 바꾼다.
+ * 4. 스택 위치를 8바이트 경계로 내린다.
+ * 5. argv[argc]에 해당하는 NULL과 각 문자열 주소를 쌓는다.
+ * 6. if_->R.rdi에 argc, if_->R.rsi에 사용자 argv 주소를 설정한다.
+ * 7. 가짜 반환 주소 0을 쌓고 if_->rsp를 갱신한다.
+ * - 크기 초과라면 사용자 스택에 쓰기 전에 false를 반환한다.
+ *
+ * 호출
+ * - process.c의 process_exec():
+ *   load(argv[0], &if_) 성공 후, do_iret() 호출 전.
+ *
+ * 기존 함수 / 자료 사용
+ * - lib/string.c: strlen(), memcpy().
+ * - include/threads/vaddr.h: USER_STACK, PGSIZE.
+ * - include/threads/interrupt.h: struct intr_frame.
+ * - process.c: 기존 load(), setup_stack().
+ *
+ * 소유권
+ * - 사용자 스택 페이지와 커널 argv 배열을 해제하지 않는다.
+ * - argv 배열 내용은 사용자 주소로 변경된다.
+ * - 커널 argv 배열과 명령어 페이지는 process_exec()이 해제한다.
+ *
+ * 검증
+ * - 아래 공통 검증 명령의 args-* 5개.
+ * - argc, 인자 순서, 연속 공백 처리, argv[argc] == NULL 확인.
+ * - argv 주소의 8바이트 정렬 확인.
+ */
+static bool setup_arguments(struct intr_frame *if_, char **argv, int argc){
+
 }
 
 
