@@ -7,6 +7,11 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "lib/stdio.h"           /* STDOUT_FILENO */
+#include "lib/kernel/stdio.h"    /* putbuf */
+#include "threads/vaddr.h"       /* is_user_vaddr, PGSIZE */
+#include "threads/mmu.h"         /* pml4_get_page */
+#include "userprog/process.h"    /* process_terminate */
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -81,8 +86,34 @@ syscall_init (void) {
  *   페이지 경계를 지나는 버퍼, 미매핑 페이지 포함 범위를 확인한다.
  * - args-* 통과만으로 이 검사가 완성됐다고 판단하지 않는다.
  */
-static bool user_buffer_readable(const void *buffer, size_t size){
+static bool 
+user_buffer_readable(const void *buffer, size_t size){
+	if (size==0)
+		return true;
+		
+	if(buffer==NULL)
+		return false;
 
+	uintptr_t start=(uintptr_t)buffer;
+
+	if(!is_user_vaddr(buffer))
+		return false;
+
+	if(size>(uintptr_t)-1-start)
+		return false;
+	uintptr_t end=start+size-1;
+
+	if(!is_user_vaddr((void *) end))
+		return false;
+
+	uint64_t *pml4 = thread_current ()->pml4;
+	uintptr_t page = start & ~(uintptr_t) (PGSIZE - 1);
+	for (; page <= end; page += PGSIZE) {
+		if (pml4_get_page (pml4, (void *) page) == NULL)
+			return false;
+	}
+	return true;
+	
 }
 
 /*
@@ -127,12 +158,29 @@ static bool user_buffer_readable(const void *buffer, size_t size){
  * - 실제 printf() 호출 진단도 별도로 실행한다.
  * - 일반 파일 write 테스트는 FD 기능 구현 후 검증한다.
  */
-static int sys_write(int fd, const void *buffer, unsigned size);
+static int 
+sys_write(int fd, const void *buffer, unsigned size){
+	if (fd != STDOUT_FILENO)
+		return -1;
+	if (size == 0)
+		return 0;
+	if (!user_buffer_readable (buffer, size))
+		process_terminate (-1);
+
+	putbuf (buffer, size);
+	return size;
+}
 
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+	switch (f->R.rax) {
+	case SYS_WRITE:
+		f->R.rax = sys_write ((int) f->R.rdi,
+		                      (const void *) f->R.rsi,
+		                      (unsigned) f->R.rdx);
+		break;
+	default:
+		thread_exit ();
+	}
 }
