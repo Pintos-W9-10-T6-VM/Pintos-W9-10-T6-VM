@@ -26,6 +26,7 @@ static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+static bool setup_arguments(struct intr_frame *if_, char **argv, int argc);
 
 /* General process initializer for initd and other process. */
 static void
@@ -176,8 +177,24 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
+	// 명령줄을 단어로 자르기
+	char *argv[64];
+	int argc = 0;
+	char *token, *save_ptr;
+	for (token = strtok_r(file_name, " ", &save_ptr); 
+		 token != NULL;
+		 token = strtok_r (NULL, " ", &save_ptr)) {
+		argv[argc] = token;
+		argc++;
+	}
+
+	// 첫 단어(파일 이름)
 	/* And then load the binary */
-	success = load (file_name, &_if);
+	success = load(argv[0], &_if);
+
+	// load 가 성공했을 때만 스택에 인자 쌓기
+	if (success)
+		success = setup_arguments(&_if, argv, argc);
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
@@ -204,6 +221,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	for (;;);
 	return -1;
 }
 
