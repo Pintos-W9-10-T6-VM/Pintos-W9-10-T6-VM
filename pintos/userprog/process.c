@@ -18,14 +18,37 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/malloc.h"		/* [YYJ] */
+#include "threads/synch.h"		/* [YYJ] */
 #ifdef VM
 #include "vm/vm.h"
 #endif
+
+/* [YYJ] 자식 스레드가 해제된 뒤에도 종료 상태를 보관한다. */
+struct child_status {
+    tid_t tid;					// 어느 자식의 기록인지
+    int exit_status;			// 자식의 종료 결과 
+    struct semaphore exited;	// 자식 종료를 부모에게 알리는 세마포어
+    struct lock ref_lock;		// 참조 수를 변경할 때 사용할 락
+    unsigned refs;				// 이 객체를 유지할 책임이 있는 참조 수
+    struct list_elem elem;		// 부모의 자식 목록에 연결할 요소
+};
+
+/* [YYJ] 새 자식에게 명령어와 공유 종료 기록을 함께 전달한다. */
+struct process_start_info {
+    char *cmdline;
+    struct child_status *status;
+};
 
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+
+static void child_status_put(struct child_status *status); 	/* [YYJ] */
+static struct child_status *child_status_create(void);		/* [YYJ] */
+void process_terminate(int status) NO_RETURN;				/* [YYJ] */
+static bool setup_arguments(struct intr_frame *if_, char **argv, int argc);	/* [YYJ] */
 
 /* General process initializer for initd and other process. */
 static void
@@ -38,37 +61,129 @@ process_init (void) {
  * before process_create_initd() returns. Returns the initd's
  * thread id, or TID_ERROR if the thread cannot be created.
  * Notice that THIS SHOULD BE CALLED ONCE. */
-tid_t
-process_create_initd (const char *file_name) {
-	char *fn_copy;
-	tid_t tid;
+tid_t process_create_initd (const char *file_name) { /* [YYJ] 최초 사용자 프로세스를 생성하고 부모의 자식 목록에 등록한다. */
+	// char *fn_copy;
+	// tid_t tid;
+	/* 스레드 이름에는 전체 명령어 대신 프로그램 이름을 사용한다. */
+    const char *program = file_name;
 
-	/* Make a copy of FILE_NAME.
-	 * Otherwise there's a race between the caller and load(). */
-	fn_copy = palloc_get_page (0);
-	if (fn_copy == NULL)
+	while (*program == ' ')
+	{
+    	program++;
+	}
+
+	if (*program == '\0')
+	{
 		return TID_ERROR;
-	strlcpy (fn_copy, file_name, PGSIZE);
+	}
 
-	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
-	if (tid == TID_ERROR)
-		palloc_free_page (fn_copy);
-	return tid;
+	char name[16];
+	strlcpy(name, program, sizeof name);
+
+	char *space = strchr(name, ' ');
+	if (space != NULL)
+	{
+		*space = '\0';
+	}
+
+	/* 명령어는 생성 중 변경되지 않도록 커널 페이지에 복사한다. */
+	char *cmdline = palloc_get_page(0);
+	if (cmdline == NULL)
+	{
+		return TID_ERROR;
+	}
+
+	if (strlcpy(cmdline, file_name, PGSIZE) >= PGSIZE)
+	{
+		palloc_free_page(cmdline);
+		return TID_ERROR;
+	}
+	
+    /* 부모·자식이 공유할 기록을 생성한다. 참조 수는 2다. */
+    struct child_status *status = child_status_create();
+    if (status == NULL) 
+	{
+        palloc_free_page(cmdline);
+        return TID_ERROR;
+    }
+	
+
+    /* 자식 시작 함수에 넘길 자료를 묶는다. */
+    struct process_start_info *start = malloc(sizeof *start);
+    if (start == NULL) 
+	{
+        child_status_put(status);
+        child_status_put(status);
+        palloc_free_page(cmdline);
+        return TID_ERROR;
+    }
+	
+    start->cmdline = cmdline;
+    start->status = status;
+
+
+    /* 자식이 생성 직후 종료할 수도 있으므로 먼저 목록에 등록한다. */
+    list_push_back(&thread_current()->children, &status->elem);
+
+    tid_t tid = thread_create(name, PRI_DEFAULT, initd, start);
+
+    if (tid == TID_ERROR) 
+	{
+        /* 자식에게 넘기지 못했으므로 부모가 모든 할당을 정리한다. */
+        list_remove(&status->elem);
+        free(start);
+        palloc_free_page(cmdline);
+        child_status_put(status);
+        child_status_put(status);
+        return TID_ERROR;
+    }
+
+    /* 부모 참조가 남아 있으므로 자식이 먼저 종료해도 기록은 유효하다. */
+    status->tid = tid;
+    return tid;
+
+
+	// /* Make a copy of FILE_NAME.
+	//  * Otherwise there's a race between the caller and load(). */
+	// fn_copy = palloc_get_page (0);
+	// if (fn_copy == NULL)
+	// 	return TID_ERROR;
+	// strlcpy (fn_copy, file_name, PGSIZE);
+
+	// /* Create a new thread to execute FILE_NAME. */
+	// tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	// if (tid == TID_ERROR)
+	// 	palloc_free_page (fn_copy);
+	// return tid;
 }
 
 /* A thread function that launches first user process. */
-static void
-initd (void *f_name) {
+static void initd (void *f_name) {
+
+
+	/* [YYJ] 부모에게 받은 자료를 인수하고 최초 프로그램을 실행한다. */
+    struct process_start_info *start = f_name;
+    struct thread *curr = thread_current();
+
+    /* 명령어는 process_exec()이 사용하고 해제한다. */
+    char *cmdline = start->cmdline;
+
+    /* 부모와 공유하는 내 종료 기록을 연결한다. */
+    curr->as_child = start->status;
+    curr->is_user_process = true;
+
+    /* 내용은 인수했으므로 전달용 포장 구조체만 해제한다. */
+    free(start);
 #ifdef VM
-	supplemental_page_table_init (&thread_current ()->spt);
+	supplemental_page_table_init (&curr->spt);
 #endif
 
 	process_init ();
 
-	if (process_exec (f_name) < 0)
-		PANIC("Fail to launch initd\n");
+	if (process_exec (cmdline) < 0)
+		process_terminate(-1); /* [YYJ] 실행 준비에 실패한 경우에만 비정상 종료한다. 기존 PANIC은 커널 전체를 멈춘다. */
 	NOT_REACHED ();
+
 }
 
 /* Clones the current process as `name`. Returns the new process's thread id, or
@@ -162,31 +277,80 @@ error:
  * Returns -1 on fail. */
 int
 process_exec (void *f_name) {
+    /* initd()에서 전달받은 커널 명령어 복사본이다. */
 	char *file_name = f_name;
-	bool success;
+	// bool success;
 
-	/* We cannot use the intr_frame in the thread structure.
-	 * This is because when current thread rescheduled,
-	 * it stores the execution information to the member. */
-	struct intr_frame _if;
-	_if.ds = _if.es = _if.ss = SEL_UDSEG;
-	_if.cs = SEL_UCSEG;
-	_if.eflags = FLAG_IF | FLAG_MBS;
 
-	/* We first kill the current context */
-	process_cleanup ();
+	/* 큰 지역 배열 대신 별도 페이지에 인자 주소들을 저장한다. */
+    char **argv = palloc_get_page(0);
+    if (argv == NULL) {
+        palloc_free_page(file_name);
+        return -1;
+    }
 
-	/* And then load the binary */
-	success = load (file_name, &_if);
+    int argc = 0;
+    const size_t max_args = PGSIZE / sizeof *argv - 1;
+    char *save_ptr = NULL;
+    bool success = false;
 
-	/* If load failed, quit. */
-	palloc_free_page (file_name);
-	if (!success)
-		return -1;
+	// /* We cannot use the intr_frame in the thread structure.
+	//  * This is because when current thread rescheduled,
+	//  * it stores the execution information to the member. */
+    /* 사용자 실행 문맥을 초기화한다. */
+	//	struct intr_frame _if;
+    struct intr_frame _if = {0};
+    _if.ds = _if.es = _if.ss = SEL_UDSEG;
+    _if.cs = SEL_UCSEG;
+    _if.eflags = FLAG_IF | FLAG_MBS;
 
-	/* Start switched process. */
-	do_iret (&_if);
-	NOT_REACHED ();
+    /* 공백으로 단어를 나눈다. 연속 공백은 건너뛴다. */
+    for (char *token = strtok_r(file_name, " ", &save_ptr);
+         token != NULL;
+         token = strtok_r(NULL, " ", &save_ptr)) {
+
+        if ((size_t) argc >= max_args)
+            goto done;
+
+        argv[argc++] = token;
+    }
+
+    /* 빈 명령어는 실행할 수 없다. */
+    if (argc == 0)
+        goto done;
+
+    argv[argc] = NULL;
+
+	// /* We first kill the current context */
+    /* 기존 주소 공간을 정리한다. */
+    process_cleanup();
+
+	// /* And then load the binary */
+    /* 전체 명령어가 아니라 첫 단어인 실행 파일 이름을 전달한다. */
+	// success = load (file_name, &_if);
+    success = load(argv[0], &_if);
+
+	// /* If load failed, quit. */
+	// palloc_free_page (file_name);
+	// if (!success)
+	// 	return -1;
+
+    /* load()가 준비한 사용자 스택에 인자들을 배치한다. */
+    if (success)
+        success = setup_arguments(&_if, argv, argc);
+
+	done:
+		/* 사용자 스택으로 복사가 끝났거나 실패했으므로 임시 메모리를 정리한다. */
+		palloc_free_page(argv);
+		palloc_free_page(file_name);
+
+		if (!success)
+			return -1;
+
+		/* Start switched process. */
+		/* 준비한 레지스터와 스택으로 사용자 프로그램을 시작한다. */
+		do_iret(&_if);
+		NOT_REACHED();
 }
 
 
@@ -199,28 +363,85 @@ process_exec (void *f_name) {
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
-int
-process_wait (tid_t child_tid UNUSED) {
+int process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	return -1;
+
+	/* [YYJ] 직접 만든 자식의 종료를 한 번 기다리고 종료값을 받는다. */
+    struct thread *curr = thread_current();
+
+    for (struct list_elem *e = list_begin(&curr->children);
+         e != list_end(&curr->children);
+         e = list_next(e)) {
+
+        struct child_status *status =
+            list_entry(e, struct child_status, elem);
+
+        if (status->tid != child_tid)
+            continue;
+
+        /* 먼저 목록에서 빼서 같은 자식을 다시 기다리지 못하게 한다. */
+        list_remove(&status->elem);
+
+        /* 자식이 아직 종료하지 않았다면 여기서 대기한다. */
+        sema_down(&status->exited);
+
+        /* 깨어난 뒤 종료 결과를 지역 변수에 복사한다. */
+        int result = status->exit_status;
+
+        /* 부모가 보유하던 참조를 반납한다. */
+        child_status_put(status);
+
+        return result;
+    }
+
+    /* 내 자식이 아니거나 이미 기다린 자식이다. */
+    return -1;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
-void
-process_exit (void) {
+/* [YYJ] 프로세스 자원을 정리하고 부모에게 종료를 알린다. */
+void process_exit (void) {
 	struct thread *curr = thread_current ();
 	/* TODO: Your code goes here.
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+    /* 사용자 프로세스의 종료 메시지만 출력한다. */
+    if (curr->is_user_process)
+        printf("%s: exit(%d)\n", curr->name, curr->exit_status);
 
-	process_cleanup ();
+    /* 기존 주소 공간 정리 순서는 유지한다. */
+    process_cleanup();
+
+    /* 내가 기다리지 않은 자식들의 부모 측 참조를 반납한다.
+     * 자식이 살아 있다면 자식 측 참조가 객체를 유지한다. */
+    while (!list_empty(&curr->children)) {
+        struct list_elem *e = list_pop_front(&curr->children);
+        struct child_status *child =
+            list_entry(e, struct child_status, elem);
+
+        child_status_put(child);
+    }
+
+    /* 내 부모에게 종료 결과를 전달한다. */
+    struct child_status *status = curr->as_child;
+
+    if (status != NULL) {
+        curr->as_child = NULL;
+        status->exit_status = curr->exit_status;
+
+        /* 부모를 깨운다. 부모가 아직 기다리지 않아도 알림은 남는다. */
+        sema_up(&status->exited);
+
+        /* 자식인 내가 보유하던 참조를 반납한다. */
+        child_status_put(status);
+    }
 }
 
 /*
- * TODO [YJY]: process_terminate
+ * TODO [YYJ]: process_terminate
  *
  * 역할
  * - 종료 상태를 기록한 뒤 현재 프로세스를 종료한다.
@@ -257,13 +478,17 @@ process_exit (void) {
  * - 부모의 process_wait() 반환값도 57인지 별도 확인한다.
  * - 잘못된 사용자 접근의 종료 상태는 -1이어야 한다.
  */
-void process_terminate(int status) NO_RETURN;
-void process_terminate(int status){
+void process_terminate(int status) { /* status: 전달받은 정수 종료값. */
+    /* 현재 스레드의 주소를 얻고, 그 구조체의 종료값 필드에 저장한다. */
+    thread_current()->exit_status = status;
 
+    /* 내부에서 process_exit()을 호출하고 스레드를 종료한다.
+     * 이 함수 호출 이후에는 여기로 돌아오지 않는다. */
+    thread_exit();
 }
 
 /*
- * TODO [YJY]: child_status_create
+ * TODO [YYJ]: child_status_create
  *
  * 역할
  * - 부모와 자식이 공유할 종료 상태 객체를 생성한다.
@@ -298,13 +523,34 @@ void process_terminate(int status){
  * - 초기 프로세스 생성 및 정상 종료.
  * - 자식 생성 실패 시 객체·명령어·시작 정보 누수 여부 확인.
  */
-static struct child_status *child_status_create(void);
-static struct child_status *child_status_create(void){
 
+static struct child_status *child_status_create(void) {
+
+    /* 구조체 하나 크기의 메모리를 할당하고 그 주소를 child에 저장한다. sizeof *child는 구조체 크기이며, 실제 메모리를 읽는 표현은 아니다. */
+    struct child_status *child = malloc(sizeof *child);
+
+    /* 메모리 할당에 실패했는지 확인한다. */
+    if (child == NULL)
+        return NULL; /* 실패를 호출자에게 알리고 즉시 종료한다. */
+
+    
+    child->tid = TID_ERROR; /* 아직 자식을 생성하기 전이므로 유효한 tid가 없다고 기록한다. */
+    child->exit_status = -1; /* 종료 결과의 기본값을 -1로 둔다. 종료 완료를 뜻하지는 않는다. */
+
+    /* 구조체 안의 세마포어 주소를 전달하여 초기값을 0으로 설정한다. 아직 종료 알림이 없으므로, 이후 sema_down()은 대기하게 된다. */
+    sema_init(&child->exited, 0);
+    /* 참조 수 변경을 보호할 락을 초기화한다. 락 획득은 아니다. */
+    lock_init(&child->ref_lock);
+
+    /* 부모가 보유할 참조 1개와 자식에게 넘길 참조 1개를 예약한다. */
+    child->refs = 2;
+    /* 초기화한 객체의 주소를 호출자에게 반환한다.
+     * malloc()으로 할당했으므로 함수가 끝나도 객체는 유지된다. */
+    return child;
 }
 
 /*
- * TODO [YJY]: child_status_put
+ * TODO [YYJ]: child_status_put
  *
  * 역할
  * - 종료 상태 객체의 참조 하나를 내려놓고 마지막 참조이면 해제한다.
@@ -340,10 +586,28 @@ static struct child_status *child_status_create(void){
  * - 자식이 먼저 종료한 경우와 부모가 먼저 기다린 경우 모두 확인.
  * - 이후 부모 선종료·미대기 자식 시나리오에서도 누수가 없어야 한다.
  */
-static void child_status_put(struct child_status *status);
-static void child_status_put(struct child_status *status){
-	
+/* [YYJ] 참조 하나를 반납하고, 마지막 참조라면 객체를 해제한다. */
+static void child_status_put(struct child_status *status) {
+    /* status는 정수 종료값이 아니라 종료 상태 객체의 주소다. 호출자가 NULL을 넘기는 잘못된 사용을 검사한다. */
+    ASSERT(status != NULL);
+    /* 참조 수를 확인하고 변경하는 동안 사용할 락을 획득한다. 다른 실행 흐름이 같은 락을 보유하고 있으면 기다린다. */
+    lock_acquire(&status->ref_lock);
+
+    /* 반납할 참조가 존재하는지 검사한다. refs는 unsigned이므로 0에서 감소시키면 큰 양수로 바뀐다. */
+    ASSERT(status->refs > 0);
+    /* 호출자가 보유한 참조 하나를 반납한다. */
+    status->refs--;
+
+    /* 마지막 참조인지 락을 잡은 상태에서 판단하여 지역 변수에 저장한다. 0이면 true, 아직 참조가 남아 있으면 false다. */
+    bool last_ref = (status->refs == 0);
+    /* 참조 수 변경이 끝났으므로 락을 해제한다. 락도 객체 안에 있으므로 객체를 해제하기 전에 수행해야 한다. */
+    lock_release(&status->ref_lock);
+
+    /* 더 이상 객체를 유지할 참조가 없는 경우에만 해제한다. */
+    if (last_ref)
+        free(status); /* malloc()으로 받은 메모리를 반납한다. */
 }
+
 
 /* Free the current process's resources. */
 static void
@@ -600,6 +864,31 @@ done:
  * - argv 주소의 8바이트 정렬 확인.
  */
 static bool setup_arguments(struct intr_frame *if_, char **argv, int argc){
+    /* [YYJ] 사용자 스택에 쓰기 전에 전체 필요 공간을 검사한다. */
+    if (argc <= 0)
+        return false;
+
+    size_t string_bytes = 0;
+
+    for (int i = 0; i < argc; i++) {
+        size_t length = strlen(argv[i]) + 1;
+
+        if (length > PGSIZE - string_bytes)
+            return false;
+
+        string_bytes += length;
+    }
+
+    /* 문자열 복사 후 8바이트 정렬에 필요한 여백이다. */
+    size_t padding = (if_->rsp - string_bytes) % 8;
+
+    /* 인자 주소 argc개 + 마지막 NULL + 가짜 반환 주소. */
+    size_t pointer_bytes = ((size_t) argc + 2) * sizeof(char *);
+
+    if (string_bytes + padding + pointer_bytes > PGSIZE)
+        return false;
+
+
 	// 문자열 본체를 역순으로 스택에 복사하기
 	for (int i = argc - 1; i >= 0; i--) {
 		// 단어 길이 구하기 ('\0' 포함)
