@@ -80,6 +80,9 @@ typedef int tid_t;
  * set to THREAD_MAGIC.  Stack overflow will normally change this
  * value, triggering the assertion. */
 
+/* [YYJ] 실제 내용은 process.c에 정의하며 여기서는 포인터로 사용한다. */
+struct child_status;
+
 /* 멤버 'elem'는 세 가지 용도로 사용됩니다.
  * 실행 큐(thread.c)의 요소이거나,
  * 수면 리스트(thread.c)의 요소이거나,
@@ -122,6 +125,12 @@ struct thread
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4; /* Page map level 4 */
+
+	/* [YYJ] 현재 프로세스의 종료 결과와 부모·자식 관계. */
+    int exit_status;	/* 나의 종료 결과 */
+    bool is_user_process;	/* 사용자 프로세스인지 표시 */
+    struct child_status *as_child;	/* 부모와 공유하는 나의 종료 기록 주소 */
+    struct list children;	/* 내가 만든 자식들의 종료 기록 목록 */
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
