@@ -173,14 +173,20 @@ sys_write(int fd, const void *buffer, unsigned size){
 
 /* The main system call interface */
 void
-syscall_handler (struct intr_frame *f UNUSED) {
-	switch (f->R.rax) {
-	case SYS_WRITE:
-		f->R.rax = sys_write ((int) f->R.rdi,
-		                      (const void *) f->R.rsi,
-		                      (unsigned) f->R.rdx);
-		break;
-	default:
-		thread_exit ();
-	}
+syscall_handler(struct intr_frame *f) {
+    switch (f->R.rax) {
+    case SYS_WRITE:
+        f->R.rax = sys_write((int) f->R.rdi,
+                            (const void *) f->R.rsi,
+                            (unsigned) f->R.rdx);
+        break;
+
+    case SYS_EXIT:
+        /* [YYJ] 사용자가 전달한 종료 상태를 기록하고 종료한다. */
+        process_terminate((int) f->R.rdi);
+        break;
+
+    default:
+        thread_exit();
+    }
 }

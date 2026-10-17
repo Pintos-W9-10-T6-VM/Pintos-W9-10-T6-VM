@@ -898,6 +898,14 @@ init_thread(struct thread *t, const char *name, int priority)
 	ASSERT(name != NULL);
 
 	memset(t, 0, sizeof *t);
+#ifdef USERPROG
+    /* [YYJ] 모든 스레드의 프로세스 관리 필드를 초기화한다. */
+    t->exit_status = -1;
+    t->is_user_process = false;
+    t->as_child = NULL;
+    list_init(&t->children);
+#endif
+
 	t->status = THREAD_BLOCKED;
 	strlcpy(t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
