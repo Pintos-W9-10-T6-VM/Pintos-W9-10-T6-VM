@@ -363,41 +363,60 @@ process_exec (void *f_name) {
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
-int process_wait (tid_t child_tid UNUSED) {
+int process_wait (tid_t child_tid) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
 
-	/* [YYJ] 직접 만든 자식의 종료를 한 번 기다리고 종료값을 받는다. */
-    struct thread *curr = thread_current();
 
-    for (struct list_elem *e = list_begin(&curr->children);
-         e != list_end(&curr->children);
-         e = list_next(e)) {
+	/* TODO [YJH 연습]: 직접 구현하기.
+	 * (a) children 목록에서 tid가 child_tid인 기록 찾기 (없으면 -1)
+	 * (b) 찾은 기록을 목록에서 빼기
+	 * (c) 자식이 끝날 때까지 기다리기
+	 * (d) 종료값 읽고, 내 몫 반납하고, 종료값 반환 */
 
-        struct child_status *status =
-            list_entry(e, struct child_status, elem);
+	struct thread *curr = thread_current(); // 지금 실행 중인 스레드 = wait를 부른 부모
 
-        if (status->tid != child_tid)
-            continue;
+	struct list_elem *e; // 목록에서 현재 보고 있는 칸(고리)
 
-        /* 먼저 목록에서 빼서 같은 자식을 다시 기다리지 못하게 한다. */
-        list_remove(&status->elem);
+	// 부모의 children 목록(= 자식마다 하나씩 있는 종료 기록들)을 처음부터 끝까지 훑는다
+	for (e = list_begin(&curr->children); // 첫 칸에서 시작
+		 e != list_end(&curr->children);  // 끝(경계 표시)에 닿으면 반복 종료
+		 e = list_next(e))				  // 한 칸씩 앞으로
+	{
+		// 칸(e)은 기록 안의 elem 필드를 가리킬 뿐이라서,
+		// list_entry로 그 elem이 들어 있는 기록 전체(child_status)의 주소를 얻는다
+		struct child_status *status = list_entry(e, struct child_status, elem);
 
-        /* 자식이 아직 종료하지 않았다면 여기서 대기한다. */
-        sema_down(&status->exited);
+		// 이 기록이 내가 기다리려는 자식의 것인가? (기록의 tid와 인자로 받은 child_tid 비교)
+		if (status->tid == child_tid)
+		{
+			// (b) 목록에서 이 기록을 뺀다.
+			//     이후 같은 tid로 다시 wait하면 목록에 없어서 못 찾고 -1이 된다 (wait-twice)
+			list_remove(&status->elem);
 
-        /* 깨어난 뒤 종료 결과를 지역 변수에 복사한다. */
-        int result = status->exit_status;
+			// (c) 자식이 끝날 때까지 기다린다.
+			//     exited 세마포어는 처음에 0이라서 여기서 잠든다.
+			//     자식이 process_exit에서 sema_up을 하면 깨어나 통과한다.
+			//     자식이 이미 끝났다면 값이 1이라 기다리지 않고 바로 통과한다.
+			sema_down(&status->exited);
 
-        /* 부모가 보유하던 참조를 반납한다. */
-        child_status_put(status);
+			// (d) 깨어났으면 자식이 종료값을 이미 적어 뒀다 (적고 나서 sema_up 하는 순서라서).
+			//     기록은 곧 반납하니, 반납하기 전에 값을 지역 변수에 복사해 둔다.
+			int result = status->exit_status;
 
-        return result;
-    }
+			// 부모 몫의 참조를 반납한다.
+			// 자식도 이미 반납했다면 refs가 0이 되어 기록이 free된다.
+			// (이 줄 이후에는 status를 읽으면 안 된다. 그래서 위에서 result에 먼저 복사)
+			child_status_put(status);
 
-    /* 내 자식이 아니거나 이미 기다린 자식이다. */
-    return -1;
+			return result;
+		}
+	}
+
+	// 끝까지 돌았는데도 못 찾았다: 내 자식이 아니거나, 이미 한 번 기다린 자식이다.
+	// 기다리지 않고 바로 -1을 반환한다.
+	return -1;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
