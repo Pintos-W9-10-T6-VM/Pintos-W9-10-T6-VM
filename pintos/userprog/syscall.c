@@ -12,6 +12,7 @@
 #include "threads/vaddr.h"       /* is_user_vaddr, PGSIZE */
 #include "threads/mmu.h"         /* pml4_get_page */
 #include "userprog/process.h"    /* process_terminate */
+#include "threads/palloc.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -88,32 +89,38 @@ syscall_init (void) {
  */
 static bool 
 user_buffer_readable(const void *buffer, size_t size){
-	if (size==0)
+	// TODO [YJH 연습]: 직접 구현하기. 위의 설계 주석 "로직 / 분기" 1~5번을 따른다.
+	
+	// (a) size가 0이면 true, buffer가 NULL이면 false
+	if (size == 0)
 		return true;
-		
-	if(buffer==NULL)
+	if (buffer == NULL)
 		return false;
 
-	uintptr_t start=(uintptr_t)buffer;
-
-	if(!is_user_vaddr(buffer))
+	// (b) 시작 주소가 사용자 영역인가
+	if (!(is_user_vaddr(buffer)))
 		return false;
 
-	if(size>(uintptr_t)-1-start)
-		return false;
-	uintptr_t end=start+size-1;
+	// (c) 끝 주소(시작 + size - 1)를 계산하고, 넘침이 없는지, 끝도 사용자 영역인지
+	uintptr_t start = (uintptr_t)buffer; // 번지를 숫자로 바꾼다
+	uintptr_t end = start + size - 1;				 // 마지막 바이트의 번지 (위 공식)
 
-	if(!is_user_vaddr((void *) end))
+	if (end < start) // 넘쳐서 끝이 시작보다 작아졌나?
 		return false;
 
-	uint64_t *pml4 = thread_current ()->pml4;
-	uintptr_t page = start & ~(uintptr_t) (PGSIZE - 1);
-	for (; page <= end; page += PGSIZE) {
-		if (pml4_get_page (pml4, (void *) page) == NULL)
+	if (!is_user_vaddr((void *)end)) // 끝도 사용자 영역이어야 한다
+		return false;
+
+	// (d) 시작~끝에 걸친 모든 페이지가 실제로 연결돼 있는가 */
+	uint64_t *pml4 = thread_current()->pml4;	// 이 프로세스의 연결표
+	uintptr_t page = start / PGSIZE * PGSIZE;	// 시작 번지가 속한 페이지의, 시작 번지
+
+	for (; page <= end; page += PGSIZE) {		// 페이지를 하나씩 확인
+		if (pml4_get_page (pml4, (void *) page) == NULL)	// 연결이 없으면
 			return false;
 	}
-	return true;
-	
+
+	return true;	// 전부 연결돼 있다
 }
 
 /*
@@ -186,7 +193,17 @@ syscall_handler(struct intr_frame *f) {
         process_terminate((int) f->R.rdi);
         break;
 
-    default:
+	case SYS_WAIT:
+		/* 사용자 프로그램의 wait(pid) 요청.
+		 * 인자: rdi = 기다릴 자식의 번호(pid)
+		 * 반환: 자식의 종료값. 기다릴 수 없는 경우 -1 */
+
+		// rdi에서 자식 번호를 꺼내 process_wait에 넘기고,
+		// 돌아온 종료값을 rax에 넣어 사용자 프로그램의 wait()가 받게 한다
+		f->R.rax = process_wait((tid_t)f->R.rdi);
+		break;
+
+	default:
         thread_exit();
     }
 }
