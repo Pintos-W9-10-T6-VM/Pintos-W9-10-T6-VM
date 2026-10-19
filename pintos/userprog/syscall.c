@@ -178,6 +178,39 @@ sys_write(int fd, const void *buffer, unsigned size){
 	return size;
 }
 
+// 사용자 메모리의 문자열을 커널 페이지로 복사한다.
+// 입력: user_str = 사용자 메모리에서 문자열이 시작하는 번지
+// 반환: 성공하면 복사본이 담긴 커널 페이지, 실패하면 NULL
+static char *
+copy_user_string (const char *user_str) {
+	// 커널 쪽에 복사본을 담을 빈 페이지를 빌린다
+	char *kpage = palloc_get_page(0);
+	if (kpage == NULL)
+		return NULL;
+
+	for (size_t i = 0; i < PGSIZE; i++) {
+		// i번째 글자가 있는 번지
+		const char *p = user_str + i;
+
+		// 읽기 전에 안전한지 확인한다 (글자 1개 분량)
+		if (!user_buffer_readable (p, 1)) {
+			palloc_free_page(kpage); // 빌린 페이지를 반납하고 실패
+			return NULL;
+		}
+
+		// 안전하니 글자 하나를 커널 쪽으로 복사한다
+		kpage[i] = *p;
+
+		// 끝 표시를 만났으면 복사 완료
+		if (kpage[i] == '\0')
+			return kpage;
+	}
+
+	// 4096자를 읽도록 끝 표시가 없었다: 너무 긴 문자열이라 실패
+	palloc_free_page(kpage);
+	return NULL;
+}
+
 /* The main system call interface */
 void
 syscall_handler(struct intr_frame *f) {
@@ -202,6 +235,22 @@ syscall_handler(struct intr_frame *f) {
 		// 돌아온 종료값을 rax에 넣어 사용자 프로그램의 wait()가 받게 한다
 		f->R.rax = process_wait((tid_t)f->R.rdi);
 		break;
+
+	case SYS_EXEC: {
+		// rdi: 사용자 메모리에서 파일 이름이 시작하는 번지
+		char *file_copy = copy_user_string((const char *)f->R.rdi);
+
+		// 번지가 이상해서 복사에 실패했다
+		if (file_copy == NULL)
+			process_terminate(-1);
+
+		// 복사본으로 프로그램으로 바꾼다
+		// 성공하면 돌아오지 않는다. 돌아왔다면 실패한 것이다.
+		if (process_exec (file_copy) < 0)
+			process_terminate(-1);
+
+		break;
+	}
 
 	default:
         thread_exit();
