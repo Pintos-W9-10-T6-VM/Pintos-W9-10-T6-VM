@@ -218,6 +218,25 @@ static unsigned sys_tell (int fd) {
     lock_release (&filesys_lock); /* 성공과 실패 모두 락을 반납한다. */
 
     return result; /* 현재 위치 또는 unsigned 형식의 오류값을 반환한다. */
+//[JE]
+static bool sys_create(const char *user_name, unsigned initial_size){
+
+//이름 복사 → 락 안에서 filesys_create 호출 → 락 해제 → 페이지 해제 순서
+char *name = user_string_copy (user_name);
+	if (name == NULL) 
+		return false; 
+		
+	//락 획득	
+	lock_acquire (&filesys_lock); 
+	
+	//filesys_create 호출 → 결과를 변수에 저장
+	bool success = filesys_create(name,initial_size); 
+	//락 해제
+	lock_release(&filesys_lock);
+  palloc_free_page(name);
+
+  //결과 반환
+  return success;
 }
 
 /* The main system call interface */
