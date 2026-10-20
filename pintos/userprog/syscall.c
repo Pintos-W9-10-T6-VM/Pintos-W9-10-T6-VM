@@ -19,6 +19,8 @@
 #include "devices/input.h" /* 표준 입력에서 input_getc를 사용한다. */
 #include <debug.h> /* NOT_REACHED를 명시적으로 가져온다. */
 #include "threads/init.h" /* [YJH] power_off()로 시스템 전원을 끄기 위해 사용한다. */
+#include <stdint.h> /* INT32_MAX를 사용한다. */
+
 struct lock filesys_lock; /* [JE/YYJ] 파일 로딩과 파일 시스템 호출이 함께 사용할 락이다. */
 
 void syscall_entry (void);
@@ -184,6 +186,22 @@ static int sys_filesize (int fd) {
     return result; /* 파일 크기 또는 -1을 호출한 핸들러에 반환한다. */
 }
 
+/* [YYJ] 열린 파일의 다음 읽기·쓰기 위치를 변경한다. */
+static void sys_seek (int fd, unsigned position) {
+    if (position > INT32_MAX) { /* 현재 off_t로 표현할 수 없는 위치를 검사한다. */
+        return; /* 음수로 변환되어 file_seek()의 ASSERT가 실패하는 것을 막는다. */
+    } /* 위치 범위 검사를 끝낸다. */
+
+    lock_acquire (&filesys_lock); /* FD 조회와 파일 위치 변경을 보호한다. */
+
+    struct file *file = process_get_file (fd); /* 현재 프로세스에서 열린 파일을 찾는다. */
+
+    if (file != NULL) { /* 유효한 파일에만 위치 변경을 적용한다. */
+        file_seek (file, (off_t) position); /* 파일 시작 기준의 절대 위치를 설정한다. */
+    } /* 없는 FD는 아무 작업 없이 처리한다. */
+
+    lock_release (&filesys_lock); /* 모든 경로에서 락을 반납한다. */
+}
 
 /* The main system call interface */
 /* [JE/YYJ] 사용자 요청 번호를 해석하고 프로세스 관리 함수에 연결한다. */
@@ -235,10 +253,9 @@ void syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 �
         case SYS_WRITE: /* 기존 표준 출력 시스템 콜을 유지한다. */
             f->R.rax = sys_write ((int) f->R.rdi, (const void *) f->R.rsi, (unsigned) f->R.rdx); /* fd·버퍼·길이를 전달하고 반환값을 기록한다. */
             break; /* 다른 시스템 콜 분기로 이어지지 않게 한다. */
-        case SYS_SEEK:
-            /* Sets the current position in FILE to NEW_POS bytes from the start of the file. */
-        //    file_seek (struct file *file, off_t new_pos);
-            break;
+        case SYS_SEEK: /* 파일 위치 변경 요청이다. */
+            sys_seek ((int) f->R.rdi, (unsigned) f->R.rsi); /* FD와 새 위치를 전달한다. */
+            break; /* void 함수이므로 RAX에 반환값을 기록하지 않는다. */
         case SYS_TELL:
             /* Returns the current position in FILE as a byte offset from the start of the file. */
         //    file_tell (struct file *file);
