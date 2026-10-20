@@ -167,6 +167,27 @@ static void sys_close (int fd) { /* 닫은 뒤 반환할 상태값은 없다. */
     lock_release (&filesys_lock); /* 사용자에게 복귀하기 전에 락을 반납한다. */
 } 
 
+//[JE]
+static bool sys_create(const char *user_name, unsigned initial_size){
+
+//이름 복사 → 락 안에서 filesys_create 호출 → 락 해제 → 페이지 해제 순서
+char *name = user_string_copy (user_name);
+	if (name == NULL) 
+		return false; 
+		
+	//락 획득	
+	lock_acquire (&filesys_lock); 
+	
+	//filesys_create 호출 → 결과를 변수에 저장
+	bool success = filesys_create(name,initial_size); 
+	//락 해제
+	lock_release(&filesys_lock);
+  palloc_free_page(name);
+
+  //결과 반환
+  return success;
+}
+
 /* The main system call interface */
 /* [JE/YYJ] 사용자 요청 번호를 해석하고 프로세스 관리 함수에 연결한다. */
 void
@@ -208,6 +229,9 @@ syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 복귀
     case SYS_WAIT: /* 자식의 종료 결과를 요청한 경우다. */
         f->R.rax = process_wait ((tid_t) f->R.rdi); /* 직접 자식을 한 번만 기다리는 기존 함수를 호출한다. */
         break; /* 기다린 결과를 가지고 사용자 코드로 복귀한다. */
+    case SYS_CREATE:
+        f->R.rax = sys_create ((const char *) f->R.rdi, (unsigned) f->R.rsi);
+        break;
     case SYS_HALT: /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
         power_off (); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
     default: /* 아직 지원하지 않는 번호를 요청한 경우다. */
