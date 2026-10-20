@@ -14,6 +14,7 @@
 #include "userprog/process.h"    /* process_terminate */
 #include "threads/palloc.h"
 #include "threads/init.h"		// power_off
+#include "filesys/filesys.h"	// filesys_create, filesys_remove, filesys_open
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -271,6 +272,20 @@ syscall_handler(struct intr_frame *f) {
 		// 인자 없음, 반환값 없음. 가상 컴퓨터의 전원을 끈다
 		power_off();
 		break;
+
+	case SYS_CREATE: {
+		// rdi: 파일 이름이 있는 사용자 메모리 번지
+		char *name = copy_user_string((const char *)f->R.rdi);
+		if (name == NULL)
+			process_terminate(-1);
+
+		// 두 번째 인자(처음 크기)를 넘기고, 성공(true)/실패(false)를 rax에 담는다
+		f->R.rax = filesys_create(name, f->R.rsi);
+
+		// 이름을 담았던 커널 페이지를 반납한다
+		palloc_free_page(name);
+		break;
+	}
 
 	default:
         thread_exit();
