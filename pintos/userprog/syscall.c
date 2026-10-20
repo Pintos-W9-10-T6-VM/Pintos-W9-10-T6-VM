@@ -209,11 +209,12 @@ syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 복귀
     case SYS_WAIT: /* 자식의 종료 결과를 요청한 경우다. */
         f->R.rax = process_wait ((tid_t) f->R.rdi); /* 직접 자식을 한 번만 기다리는 기존 함수를 호출한다. */
         break; /* 기다린 결과를 가지고 사용자 코드로 복귀한다. */
-    
-	case SYS_HALT: /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
-		power_off(); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
 	
-	default:					/* 아직 지원하지 않는 번호를 요청한 경우다. */							// thread_exit();
-		process_terminate (-1); /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
+	case SYS_HALT:	 /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
+		power_off(); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
+
+	default: /* 아직 지원하지 않는 번호를 요청한 경우다. */
+	    // thread_exit();
+        process_terminate (-1); /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
     }
 }
