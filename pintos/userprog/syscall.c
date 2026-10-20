@@ -203,6 +203,23 @@ static void sys_seek (int fd, unsigned position) {
     lock_release (&filesys_lock); /* 모든 경로에서 락을 반납한다. */
 }
 
+/* [YYJ] 열린 파일의 현재 읽기·쓰기 위치를 반환한다. */
+static unsigned sys_tell (int fd) {
+    unsigned result = (unsigned) -1; /* 유효하지 않은 FD의 오류 반환값이다. */
+
+    lock_acquire (&filesys_lock); /* FD 조회와 파일 위치 조회를 보호한다. */
+
+    struct file *file = process_get_file (fd); /* 현재 프로세스에서 열린 파일을 찾는다. */
+
+    if (file != NULL) { /* 유효한 파일에서만 위치를 조회한다. */
+        result = (unsigned) file_tell (file); /* 파일 시작 기준의 현재 위치를 얻는다. */
+    } /* 없는 FD이면 오류 반환값을 유지한다. */
+
+    lock_release (&filesys_lock); /* 성공과 실패 모두 락을 반납한다. */
+
+    return result; /* 현재 위치 또는 unsigned 형식의 오류값을 반환한다. */
+}
+
 /* The main system call interface */
 /* [JE/YYJ] 사용자 요청 번호를 해석하고 프로세스 관리 함수에 연결한다. */
 void syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 복귀 위치를 담는다. */
@@ -256,9 +273,10 @@ void syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 �
         case SYS_SEEK: /* 파일 위치 변경 요청이다. */
             sys_seek ((int) f->R.rdi, (unsigned) f->R.rsi); /* FD와 새 위치를 전달한다. */
             break; /* void 함수이므로 RAX에 반환값을 기록하지 않는다. */
-        case SYS_TELL:
+        case SYS_TELL:  /* 현재 파일 위치 조회 요청이다. */
             /* Returns the current position in FILE as a byte offset from the start of the file. */
-        //    file_tell (struct file *file);
+        //    file_tell(f->R.rdi);
+            f->R.rax = sys_tell ((int) f->R.rdi); /* FD를 전달하고 반환값을 RAX에 기록한다. */
             break;
         case SYS_CLOSE: /* 일반 파일 닫기를 요청한 경우다. */
             sys_close ((int) f->R.rdi); /* 현재 프로세스가 보유한 FD를 닫는다. */
