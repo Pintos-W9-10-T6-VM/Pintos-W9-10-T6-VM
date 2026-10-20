@@ -54,22 +54,22 @@ syscall_init (void) {
 
 /* [YYJ] 사용자 범위 전체의 매핑과 사용자 접근 권한을 읽기 전에 검사한다. */
 static bool user_buffer_readable (const void *buffer, size_t size) { /* 문자열 한 바이트 또는 write 전체 버퍼에 사용한다. */
-    if (size == 0) /* 실제 메모리 접근이 없는 요청인지 확인한다. */
+    if(size == 0) /* 실제 메모리 접근이 없는 요청인지 확인한다. */
         return true; /* 빈 범위에는 주소 역참조가 필요 없다. */
-    if (buffer == NULL || !is_user_vaddr (buffer)) /* NULL과 커널 영역 시작 주소를 거부한다. */
+    if(buffer == NULL || !is_user_vaddr (buffer)) /* NULL과 커널 영역 시작 주소를 거부한다. */
         return false; /* 유효하지 않은 시작 주소다. */
     uintptr_t start = (uintptr_t) buffer; /* 주소 계산에 쓸 정수로 변환한다. */
-    if (size - 1 > UINTPTR_MAX - start) /* 마지막 주소 계산이 정수 범위를 넘는지 검사한다. */
+    if(size - 1 > UINTPTR_MAX - start) /* 마지막 주소 계산이 정수 범위를 넘는지 검사한다. */
         return false; /* 주소가 낮은 값으로 감기는 요청을 거부한다. */
     uintptr_t end = start + size - 1; /* 범위에 포함된 마지막 바이트 주소를 구한다. */
-    if (!is_user_vaddr ((void *) end)) /* 범위 끝이 커널 영역에 닿는지 검사한다. */
+    if(!is_user_vaddr ((void *) end)) /* 범위 끝이 커널 영역에 닿는지 검사한다. */
         return false; /* 일부만 사용자 영역인 요청을 거부한다. */
     uint64_t *pml4 = thread_current ()->pml4; /* 현재 사용자 주소 공간을 얻는다. */
-    if (pml4 == NULL) /* 유효한 사용자 주소 공간이 있는지 확인한다. */
+    if(pml4 == NULL) /* 유효한 사용자 주소 공간이 있는지 확인한다. */
         return false; /* 조회할 페이지 테이블이 없으면 실패한다. */
-    for (uintptr_t page = (uintptr_t) pg_round_down (buffer); page <= end; page += PGSIZE) { /* 걸친 모든 페이지를 순회한다. */
+    for(uintptr_t page = (uintptr_t) pg_round_down (buffer); page <= end; page += PGSIZE) { /* 걸친 모든 페이지를 순회한다. */
         uint64_t *pte = pml4e_walk (pml4, page, 0); /* 없던 페이지 테이블을 만들지 않고 PTE를 조회한다. */
-        if (pte == NULL || !(*pte & PTE_P) || !is_user_pte (pte)) /* 존재·현재 매핑·사용자 접근 권한을 확인한다. */
+        if(pte == NULL || !(*pte & PTE_P) || !is_user_pte (pte)) /* 존재·현재 매핑·사용자 접근 권한을 확인한다. */
             return false; /* 하나라도 접근할 수 없으면 전체 범위를 거부한다. */
     } /* 사용자 페이지 검사를 끝낸다. */
     return true; /* 전체 범위를 읽을 수 있다. */
@@ -78,16 +78,16 @@ static bool user_buffer_readable (const void *buffer, size_t size) { /* 문자�
 /* [JE/YYJ] 사용자 문자열을 검사하며 커널 페이지로 복사한다. 페이지 소유권은 호출자에게 넘긴다. */
 static char *user_string_copy (const char *user_string) { /* 사용자 주소를 검증 전에 문자열 함수에 넘기지 않는다. */
     char *copy = palloc_get_page (0); /* 사용자 주소 공간 교체 이후에도 유지할 커널 페이지를 받는다. */
-    if (copy == NULL) /* 페이지 할당에 실패했는지 확인한다. */
+    if(copy == NULL) /* 페이지 할당에 실패했는지 확인한다. */
         return NULL; /* 호출자가 fork 실패 또는 exec 종료 정책을 적용하게 한다. */
     uintptr_t address = (uintptr_t) user_string; /* 사용자 포인터를 주소 계산용 정수로 보관한다. */
-    for (size_t i = 0; i < PGSIZE; i++) { /* NUL을 포함해 한 페이지까지만 저장한다. */
-        if (!user_buffer_readable ((const void *) address, 1)) { /* 실제 읽을 한 바이트의 사용자 영역·매핑을 먼저 확인한다. */
+    for(size_t i = 0; i < PGSIZE; i++) { /* NUL을 포함해 한 페이지까지만 저장한다. */
+        if(!user_buffer_readable ((const void *) address, 1)) { /* 실제 읽을 한 바이트의 사용자 영역·매핑을 먼저 확인한다. */
             palloc_free_page (copy); /* 검증 실패 시 이미 받은 임시 페이지를 반납한다. */
             process_terminate (-1); /* 잘못된 사용자 포인터로 커널이 죽지 않도록 요청 프로세스만 종료한다. */
         } /* 현재 바이트의 주소 검증을 끝낸다. */
         copy[i] = *(const char *) address; /* 검증한 사용자 바이트를 커널 복사본에 기록한다. */
-        if (copy[i] == '\0') /* 문자열 끝 NUL까지 복사했는지 확인한다. */
+        if(copy[i] == '\0') /* 문자열 끝 NUL까지 복사했는지 확인한다. */
             return copy; /* 복사 페이지를 호출자에게 넘긴다. */
         address++; /* 다음 바이트 주소로 이동한다. 검증된 주소는 KERN_BASE 미만이라 정수 최댓값에 닿지 않는다. */
     } /* 한 페이지 범위의 복사 시도를 끝낸다. */
@@ -97,14 +97,14 @@ static char *user_string_copy (const char *user_string) { /* 사용자 주소를
 
 /* [YYJ] 커널이 사용자 버퍼에 결과를 쓸 수 있는지 전체 페이지의 쓰기 권한까지 검사한다. */
 static bool user_buffer_writable (void *buffer, size_t size) { /* read의 목적지에 사용하는 검사다. */
-    if (!user_buffer_readable (buffer, size)) /* 먼저 범위·매핑·사용자 접근 가능 여부를 검사한다. */
+    if(!user_buffer_readable (buffer, size)) /* 먼저 범위·매핑·사용자 접근 가능 여부를 검사한다. */
         return false; /* 매핑이 없으면 PTE를 읽지 않고 실패한다. */
-    if (size == 0) /* 접근할 바이트가 없는지 확인한다. */
+    if(size == 0) /* 접근할 바이트가 없는지 확인한다. */
         return true; /* 길이 0이면 쓰기 권한을 검사할 페이지도 없다. */
     uintptr_t end = (uintptr_t) buffer + size - 1; /* 앞선 범위 검사로 오버플로가 없음을 확인한 마지막 주소다. */
-    for (uintptr_t page = (uintptr_t) pg_round_down (buffer); page <= end; page += PGSIZE) { /* 걸친 모든 페이지를 검사한다. */
+    for(uintptr_t page = (uintptr_t) pg_round_down (buffer); page <= end; page += PGSIZE) { /* 걸친 모든 페이지를 검사한다. */
         uint64_t *pte = pml4e_walk (thread_current ()->pml4, page, 0); /* 페이지 테이블을 새로 만들지 않고 PTE를 조회한다. */
-        if (!is_writable (pte)) /* 이미 매핑을 검증한 PTE의 쓰기 권한을 검사한다. */
+        if(!is_writable (pte)) /* 이미 매핑을 검증한 PTE의 쓰기 권한을 검사한다. */
             return false; /* 읽기 전용 메모리를 read 목적지로 허용하지 않는다. */
     } /* 쓰기 권한 검사를 끝낸다. */
     return true; /* 전체 범위에 쓸 수 있다. */
@@ -113,14 +113,14 @@ static bool user_buffer_writable (void *buffer, size_t size) { /* read의 목적
 /* [YYJ] 사용자 파일 이름을 검증·복사한 뒤 일반 FD를 만든다. */
 static int sys_open (const char *user_name) { /* 문자열을 다룰 때 파일 시스템 락을 먼저 잡지 않는다. */
     char *name = user_string_copy (user_name); /* 커널에서 사용할 안전한 이름 페이지를 만든다. */
-    if (name == NULL) /* 페이지 할당 실패를 확인한다. */
+    if(name == NULL) /* 페이지 할당 실패를 확인한다. */
         return -1; /* 아직 열린 파일이 없으므로 실패만 반환한다. */
     lock_acquire (&filesys_lock); /* filesys_open과 FD 등록·실패 정리를 함께 보호한다. */
     struct file *file = filesys_open (name); /* 기존 파일을 연다. 없으면 NULL이다. */
     int fd = -1; /* 성공하기 전까지 반환값은 실패다. */
-    if (file != NULL) { /* 파일 열기에 성공했는지 확인한다. */
+    if(file != NULL) { /* 파일 열기에 성공했는지 확인한다. */
         fd = process_add_file (file); /* 성공하면 파일 소유권을 현재 프로세스의 FD 기록에 넘긴다. */
-        if (fd == -1) /* FD 기록 생성 실패를 검사한다. */
+        if(fd == -1) /* FD 기록 생성 실패를 검사한다. */
             file_close (file); /* 소유권을 넘기지 못한 열린 파일을 즉시 닫는다. */
     } /* 파일 열기 후 처리를 끝낸다. */
     lock_release (&filesys_lock); /* 사용자 코드로 복귀하기 전에 락을 반납한다. */
@@ -130,10 +130,10 @@ static int sys_open (const char *user_name) { /* 문자열을 다룰 때 파일 
 
 /* [YYJ] 표준 입력 또는 일반 파일을 사용자 목적지 버퍼로 읽는다. */
 static int sys_read (int fd, void *buffer, unsigned size) { /* 반환은 읽은 바이트 수 또는 -1이다. */
-    if (!user_buffer_writable (buffer, size)) /* 파일 시스템 락을 잡기 전에 전체 목적지를 검증한다. */
+    if(!user_buffer_writable (buffer, size)) /* 파일 시스템 락을 잡기 전에 전체 목적지를 검증한다. */
         process_terminate (-1); /* 잘못된 주소이면 요청한 프로세스만 정리하고 종료한다. */
-    if (fd == 0) { /* 예약된 표준 입력을 별도로 처리한다. */
-        for (unsigned i = 0; i < size; i++) /* 요청 바이트 수만큼 입력을 받는다. */
+    if(fd == 0) { /* 예약된 표준 입력을 별도로 처리한다. */
+        for(unsigned i = 0; i < size; i++) /* 요청 바이트 수만큼 입력을 받는다. */
             ((uint8_t *) buffer)[i] = input_getc (); /* 검증한 사용자 버퍼에 한 바이트씩 기록한다. */
         return size; /* 표준 입력에서 채운 바이트 수를 반환한다. */
     } /* 표준 입력 처리를 끝낸다. */
@@ -146,10 +146,10 @@ static int sys_read (int fd, void *buffer, unsigned size) { /* 반환은 읽은 
 
 /* [YYJ] stdout 동작을 유지하며 일반 파일 쓰기도 같은 FD 구조에 연결한다. */
 static int sys_write (int fd, const void *buffer, unsigned size) { /* 기존 sys_write 정의 전체를 교체한다. */
-    if (!user_buffer_readable (buffer, size)) /* 락 획득 전에 원본 버퍼 전체를 검증한다. */
+    if(!user_buffer_readable (buffer, size)) /* 락 획득 전에 원본 버퍼 전체를 검증한다. */
         process_terminate (-1); /* 잘못된 사용자 메모리는 프로세스 종료로 처리한다. */
-    if (fd == STDOUT_FILENO) { /* 표준 출력은 파일 객체 없이 처리한다. */
-        if (size != 0) /* 빈 버퍼에는 접근하지 않도록 한다. */
+    if(fd == STDOUT_FILENO) { /* 표준 출력은 파일 객체 없이 처리한다. */
+        if(size != 0) /* 빈 버퍼에는 접근하지 않도록 한다. */
             putbuf (buffer, size); /* 여러 프로세스의 출력이 섞이지 않도록 기존 콘솔 함수를 사용한다. */
         return size; /* 출력한 바이트 수를 반환한다. */
     } /* 표준 출력 처리를 끝낸다. */
@@ -167,51 +167,87 @@ static void sys_close (int fd) { /* 닫은 뒤 반환할 상태값은 없다. */
     lock_release (&filesys_lock); /* 사용자에게 복귀하기 전에 락을 반납한다. */
 } 
 
+/* [YYJ] 현재 프로세스가 연 파일의 전체 크기를 바이트 단위로 반환한다. */
+static int sys_filesize (int fd) {
+    int result = -1; /* 유효하지 않은 FD에 사용할 기본 반환값이다. */
+
+    lock_acquire (&filesys_lock); /* FD 조회와 파일 크기 조회를 공통 락으로 보호한다. */
+
+    struct file *file = process_get_file (fd); /* 현재 프로세스에서 fd에 해당하는 파일을 찾는다. */
+
+    if (file != NULL) { /* 파일을 찾았을 때만 file_length()를 호출한다. */
+        result = file_length (file); /* 현재 읽기 위치와 무관한 전체 파일 크기를 얻는다. */
+    } /* 파일이 없으면 기본값 -1을 유지한다. */
+
+    lock_release (&filesys_lock); /* 성공과 실패 모두 락을 반납한다. */
+
+    return result; /* 파일 크기 또는 -1을 호출한 핸들러에 반환한다. */
+}
+
+
 /* The main system call interface */
 /* [JE/YYJ] 사용자 요청 번호를 해석하고 프로세스 관리 함수에 연결한다. */
-void
-syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 복귀 위치를 담는다. */
+void syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 복귀 위치를 담는다. */
     switch (f->R.rax) { /* 진입 시 RAX에 저장된 시스템 콜 번호로 분기한다. */
-    case SYS_WRITE: /* 기존 표준 출력 시스템 콜을 유지한다. */
-        f->R.rax = sys_write ((int) f->R.rdi, (const void *) f->R.rsi, (unsigned) f->R.rdx); /* fd·버퍼·길이를 전달하고 반환값을 기록한다. */
-        break; /* 다른 시스템 콜 분기로 이어지지 않게 한다. */
-    case SYS_EXIT: /* 사용자가 명시적으로 종료를 요청한 경우다. */
-        process_terminate ((int) f->R.rdi); /* 부호 있는 int 종료값을 기록하고 종료한다. 반환하지 않는다. */
-    case SYS_OPEN: /* 일반 파일 열기를 요청한 경우다. */
-        f->R.rax = sys_open ((const char *) f->R.rdi); /* 파일 이름을 검증하고 FD를 반환한다. */
-        break; /* open 분기를 끝낸다. */
-    case SYS_READ: /* 표준 입력 또는 일반 파일 읽기를 요청한 경우다. */
-        f->R.rax = sys_read ((int) f->R.rdi, (void *) f->R.rsi, (unsigned) f->R.rdx); /* 쓰기 권한 검사 후 읽는다. */
-        break; /* read 분기를 끝낸다. */
-    case SYS_CLOSE: /* 일반 파일 닫기를 요청한 경우다. */
-        sys_close ((int) f->R.rdi); /* 현재 프로세스가 보유한 FD를 닫는다. */
-        break; /* close 분기를 끝낸다. */
-    case SYS_FORK: { /* 이 분기의 지역 변수들이 다른 case와 섞이지 않도록 블록을 연다. */
-        char *name = user_string_copy ((const char *) f->R.rdi); /* 사용자 자식 이름을 안전한 커널 페이지에 복사한다. */
-        if (name == NULL) { /* 이름 복사용 페이지 할당 실패를 처리한다. */
-            f->R.rax = TID_ERROR; /* 자식을 만들지 않고 부모에게 실패를 반환한다. */
-            break; /* fork 분기를 끝낸다. */
-        } /* 이름 페이지 할당 실패 처리를 끝낸다. */
-        tid_t tid = process_fork (name, f); /* 사용자 프레임을 전달하고 자식 복제 결과를 기다린다. */
-        palloc_free_page (name); /* thread_create가 이름을 복사했으므로 임시 페이지는 더 필요 없다. */
-        f->R.rax = tid; /* 부모에게 자식 PID 또는 TID_ERROR를 반환한다. */
-        break; /* fork 분기를 끝낸다. */
-    } /* fork의 지역 변수 범위를 끝낸다. */
-    case SYS_EXEC: { /* exec 명령어를 보관할 지역 변수 범위를 연다. */
-        char *cmdline = user_string_copy ((const char *) f->R.rdi); /* 이전 사용자 주소 공간을 없애기 전에 명령어를 복사한다. */
-        if (cmdline == NULL) /* 커널 명령어 페이지 할당 실패를 확인한다. */
-            process_terminate (-1); /* exec 준비 실패 시 현재 프로세스를 종료한다. */
-        if (process_exec (cmdline) < 0) /* 페이지 소유권을 넘긴다. 성공 시 돌아오지 않고 실패 시 내부에서 페이지를 정리한다. */
-            process_terminate (-1); /* 실행 실패는 기존 프로그램으로 복귀하지 않고 -1로 종료한다. */
-        NOT_REACHED (); /* 기존 process_exec 계약상 성공·실패 모두 여기로 정상 복귀하지 않는다. */
-    } /* exec의 지역 변수 범위를 끝낸다. */
-    case SYS_WAIT: /* 자식의 종료 결과를 요청한 경우다. */
-        f->R.rax = process_wait ((tid_t) f->R.rdi); /* 직접 자식을 한 번만 기다리는 기존 함수를 호출한다. */
-        break; /* 기다린 결과를 가지고 사용자 코드로 복귀한다. */
-    case SYS_HALT: /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
-        power_off (); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
-    default: /* 아직 지원하지 않는 번호를 요청한 경우다. */
-	    // thread_exit();
-        process_terminate (-1); /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
-    }
+        case SYS_HALT: { /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
+            power_off (); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
+            break; 
+        }
+        case SYS_EXIT: /* 사용자가 명시적으로 종료를 요청한 경우다. */
+            process_terminate ((int) f->R.rdi); /* 부호 있는 int 종료값을 기록하고 종료한다. 반환하지 않는다. */
+        case SYS_FORK: { /* 이 분기의 지역 변수들이 다른 case와 섞이지 않도록 블록을 연다. */
+            char *name = user_string_copy ((const char *) f->R.rdi); /* 사용자 자식 이름을 안전한 커널 페이지에 복사한다. */
+            if(name == NULL) { /* 이름 복사용 페이지 할당 실패를 처리한다. */
+                f->R.rax = TID_ERROR; /* 자식을 만들지 않고 부모에게 실패를 반환한다. */
+                break; 
+            } /* 이름 페이지 할당 실패 처리를 끝낸다. */
+            tid_t tid = process_fork (name, f); /* 사용자 프레임을 전달하고 자식 복제 결과를 기다린다. */
+            palloc_free_page (name); /* thread_create가 이름을 복사했으므로 임시 페이지는 더 필요 없다. */
+            f->R.rax = tid; /* 부모에게 자식 PID 또는 TID_ERROR를 반환한다. */
+            break; 
+        } 
+        case SYS_EXEC: { /* exec 명령어를 보관할 지역 변수 범위를 연다. */
+            char *cmdline = user_string_copy ((const char *) f->R.rdi); /* 이전 사용자 주소 공간을 없애기 전에 명령어를 복사한다. */
+            if(cmdline == NULL) /* 커널 명령어 페이지 할당 실패를 확인한다. */
+                process_terminate (-1); /* exec 준비 실패 시 현재 프로세스를 종료한다. */
+            if(process_exec (cmdline) < 0) /* 페이지 소유권을 넘긴다. 성공 시 돌아오지 않고 실패 시 내부에서 페이지를 정리한다. */
+                process_terminate (-1); /* 실행 실패는 기존 프로그램으로 복귀하지 않고 -1로 종료한다. */
+            NOT_REACHED (); /* 기존 process_exec 계약상 성공·실패 모두 여기로 정상 복귀하지 않는다. */
+        } 
+        case SYS_WAIT: /* 자식의 종료 결과를 요청한 경우다. */
+            f->R.rax = process_wait ((tid_t) f->R.rdi); /* 직접 자식을 한 번만 기다리는 기존 함수를 호출한다. */
+            break; /* 기다린 결과를 가지고 사용자 코드로 복귀한다. */
+        case SYS_CREATE:
+            /* JE */
+            break;
+        case SYS_REMOVE:
+            /* JE */
+            break;
+        case SYS_OPEN: /* 일반 파일 열기를 요청한 경우다. */
+            f->R.rax = sys_open ((const char *) f->R.rdi); /* 파일 이름을 검증하고 FD를 반환한다. */
+            break; /* open 분기를 끝낸다. */
+        case SYS_FILESIZE: /* 사용자가 파일 크기를 요청한 경우다. */
+            f->R.rax = sys_filesize ((int) f->R.rdi); /* 첫 번째 인자를 int FD로 읽고 결과를 반환 레지스터에 저장한다. */
+            break; /* 다른 시스템 콜 분기를 실행하지 않는다. */
+        case SYS_READ: /* 표준 입력 또는 일반 파일 읽기를 요청한 경우다. */
+            f->R.rax = sys_read ((int) f->R.rdi, (void *) f->R.rsi, (unsigned) f->R.rdx); /* 쓰기 권한 검사 후 읽는다. */
+            break; /* read 분기를 끝낸다. */
+        case SYS_WRITE: /* 기존 표준 출력 시스템 콜을 유지한다. */
+            f->R.rax = sys_write ((int) f->R.rdi, (const void *) f->R.rsi, (unsigned) f->R.rdx); /* fd·버퍼·길이를 전달하고 반환값을 기록한다. */
+            break; /* 다른 시스템 콜 분기로 이어지지 않게 한다. */
+        case SYS_SEEK:
+            /* Sets the current position in FILE to NEW_POS bytes from the start of the file. */
+        //    file_seek (struct file *file, off_t new_pos);
+            break;
+        case SYS_TELL:
+            /* Returns the current position in FILE as a byte offset from the start of the file. */
+        //    file_tell (struct file *file);
+            break;
+        case SYS_CLOSE: /* 일반 파일 닫기를 요청한 경우다. */
+            sys_close ((int) f->R.rdi); /* 현재 프로세스가 보유한 FD를 닫는다. */
+            break; /* close 분기를 끝낸다. */
+        default: /* 아직 지원하지 않는 번호를 요청한 경우다. */
+            // thread_exit();
+            process_terminate (-1); /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
+        }
 }
