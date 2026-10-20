@@ -13,6 +13,7 @@
 #include "threads/mmu.h"         /* pml4_get_page */
 #include "userprog/process.h"    /* process_terminate */
 #include "threads/palloc.h"
+#include "threads/init.h"		// power_off
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -265,6 +266,11 @@ syscall_handler(struct intr_frame *f) {
 		palloc_free_page(name);
 		break;
 	}
+
+	case SYS_HALT:
+		// 인자 없음, 반환값 없음. 가상 컴퓨터의 전원을 끈다
+		power_off();
+		break;
 
 	default:
         thread_exit();
