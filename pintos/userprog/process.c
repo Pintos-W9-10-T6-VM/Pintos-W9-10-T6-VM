@@ -20,6 +20,8 @@
 #include "intrinsic.h"
 #include "threads/malloc.h"		/* [YYJ] */
 #include "threads/synch.h"		/* [YYJ] */
+#include "userprog/syscall.h" /* [YYJ] syscall.c에 정의한 공통 파일 시스템 락 선언을 가져온다. */
+
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -40,6 +42,23 @@ struct process_start_info {
     struct child_status *status;
 };
 
+struct process_file { /* [YYJ] 프로세스별 FD 번호와 해당 파일 핸들을 연결한다. */
+    int fd; /* 사용자에게 반환한 2 이상의 파일 디스크립터다. */
+    struct file *file; /* 이 기록이 소유하는 열린 파일 객체다. */
+    struct list_elem elem; /* thread의 open_files 목록에 연결할 요소다. */
+}; /* process_file 정의를 끝낸다. */
+
+/* [YYJ] 부모가 만들고, 자식의 복제 결과를 확인한 뒤 부모가 해제하는 전달 객체다. */
+struct fork_start_info { /* 서로 별개인 실행 문맥·종료 기록·완료 알림을 한곳에 묶는다. */
+    struct thread *parent; /* 복제 중인 원본 주소 공간을 가진 부모 스레드다. */
+    struct intr_frame frame; /* 부모 syscall 진입 당시의 사용자 레지스터 값 복사본이다. */
+    struct child_status *status; /* 부모·자식이 각 참조 하나를 보유할 종료 기록이다. */
+    struct semaphore completed; /* 복제 준비 완료 알림이다. status->exited와 역할이 다르다. */
+    bool success; /* 주소 공간 등 현재 단계의 복제가 성공했는지 기록한다. */
+}; /* 이 객체의 수명은 부모가 completed를 받고 결과를 읽을 때까지다. */
+/* 선언 연결: 기존 static void __do_fork (void *);, child_status_create(), child_status_put()의 전방 선언이 
+이미 있으므로 그대로 사용한다. fork_start_info는 process.c 안에서만 사용하므로 헤더에 노출하지 않는다. */
+
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
@@ -49,6 +68,8 @@ static void child_status_put(struct child_status *status); 	/* [YYJ] */
 static struct child_status *child_status_create(void);		/* [YYJ] */
 void process_terminate(int status) NO_RETURN;				/* [YYJ] */
 static bool setup_arguments(struct intr_frame *if_, char **argv, int argc);	/* [YYJ] */
+static bool process_duplicate_files (struct thread *parent); /* 자식에서 부모 FD와 실행 파일 핸들을 복제한다. */
+static void process_close_all_files (void); /* 종료할 때 현재 프로세스의 일반 FD들을 모두 닫는다. */
 
 /* General process initializer for initd and other process. */
 static void
@@ -87,23 +108,36 @@ tid_t process_create_initd (const char *file_name) { /* [YYJ] 최초 사용자 �
 	}
 
 	/* 명령어는 생성 중 변경되지 않도록 커널 페이지에 복사한다. */
-	char *cmdline = palloc_get_page(0);
-	if (cmdline == NULL)
+	char *fn_copy = palloc_get_page(0);
+	if (fn_copy == NULL)
 	{
 		return TID_ERROR;
 	}
 
-	if (strlcpy(cmdline, file_name, PGSIZE) >= PGSIZE)
+	if (strlcpy(fn_copy, file_name, PGSIZE) >= PGSIZE)
 	{
-		palloc_free_page(cmdline);
+		palloc_free_page(fn_copy);
 		return TID_ERROR;
 	}
 	
+	// /* Make a copy of FILE_NAME.
+	//  * Otherwise there's a race between the caller and load(). */
+	// fn_copy = palloc_get_page (0);
+	// if (fn_copy == NULL)
+	// 	return TID_ERROR;
+	// strlcpy (fn_copy, file_name, PGSIZE);
+
+	// /* Create a new thread to execute FILE_NAME. */
+	// tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	// if (tid == TID_ERROR)
+	// 	palloc_free_page (fn_copy);
+	// return tid;
+
     /* 부모·자식이 공유할 기록을 생성한다. 참조 수는 2다. */
     struct child_status *status = child_status_create();
     if (status == NULL) 
 	{
-        palloc_free_page(cmdline);
+        palloc_free_page(fn_copy);
         return TID_ERROR;
     }
 	
@@ -114,11 +148,11 @@ tid_t process_create_initd (const char *file_name) { /* [YYJ] 최초 사용자 �
 	{
         child_status_put(status);
         child_status_put(status);
-        palloc_free_page(cmdline);
+        palloc_free_page(fn_copy);
         return TID_ERROR;
     }
 	
-    start->cmdline = cmdline;
+    start->cmdline = fn_copy;
     start->status = status;
 
 
@@ -132,7 +166,7 @@ tid_t process_create_initd (const char *file_name) { /* [YYJ] 최초 사용자 �
         /* 자식에게 넘기지 못했으므로 부모가 모든 할당을 정리한다. */
         list_remove(&status->elem);
         free(start);
-        palloc_free_page(cmdline);
+        palloc_free_page(fn_copy);
         child_status_put(status);
         child_status_put(status);
         return TID_ERROR;
@@ -143,18 +177,7 @@ tid_t process_create_initd (const char *file_name) { /* [YYJ] 최초 사용자 �
     return tid;
 
 
-	// /* Make a copy of FILE_NAME.
-	//  * Otherwise there's a race between the caller and load(). */
-	// fn_copy = palloc_get_page (0);
-	// if (fn_copy == NULL)
-	// 	return TID_ERROR;
-	// strlcpy (fn_copy, file_name, PGSIZE);
 
-	// /* Create a new thread to execute FILE_NAME. */
-	// tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
-	// if (tid == TID_ERROR)
-	// 	palloc_free_page (fn_copy);
-	// return tid;
 }
 
 /* A thread function that launches first user process. */
@@ -188,90 +211,183 @@ static void initd (void *f_name) {
 
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
-tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
+/* [YYJ] 자식을 생성하고, 자식의 복제 성공 여부를 확인한 뒤 부모에게 반환한다. */
+tid_t process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
-}
+	// return thread_create (name,
+	// 		PRI_DEFAULT, __do_fork, thread_current ());
+
+    struct child_status *status = child_status_create (); /* 부모용 1개·자식용 예약 1개의 참조를 만든다. */
+    if (status == NULL) /* 종료 기록을 만들지 못했는지 확인한다. */
+        return TID_ERROR; /* 아직 다른 자원이 없으므로 실패만 반환한다. */
+    struct fork_start_info *start = malloc (sizeof *start); /* 큰 레지스터 복사본은 커널 스택 대신 힙에 둔다. */
+    if (start == NULL) { /* 전달 객체를 만들지 못하면 예약 참조도 취소한다. */
+        child_status_put (status); /* 부모용 참조를 반납한다. */
+        child_status_put (status); /* 아직 자식에게 넘기지 못한 참조도 반납한다. */
+        return TID_ERROR; /* 생성 실패를 반환한다. */
+    } /* 전달 객체 할당 실패 처리를 끝낸다. */
+    start->parent = thread_current (); /* 복제할 부모 스레드 주소를 보관한다. */
+    start->frame = *if_; /* 사용자 레지스터 값을 복사한다. parent->tf는 사용하지 않는다. */
+    start->status = status; /* 자식이 자기 종료 기록을 연결할 수 있도록 주소를 보관한다. */
+    start->success = false; /* 명시적인 성공 알림 전까지는 실패 상태로 둔다. */
+    sema_init (&start->completed, 0); /* 부모가 복제 완료 알림을 기다리도록 0으로 초기화한다. */
+    list_push_back (&thread_current ()->children, &status->elem); /* 자식이 즉시 종료해도 부모 참조가 남도록 먼저 등록한다. */
+    tid_t tid = thread_create (name, PRI_DEFAULT, __do_fork, start); /* 자식에게 전달 객체 주소를 넘긴다. */
+    if (tid == TID_ERROR) { /* 자식 스레드 자체를 생성하지 못한 경우다. */
+        list_remove (&status->elem); /* 성공한 자식 목록에 실패 기록을 남기지 않는다. */
+        free (start); /* 자식이 받지 못한 전달 객체를 부모가 해제한다. */
+        child_status_put (status); /* 부모용 참조를 반납한다. */
+        child_status_put (status); /* 자식용 예약 참조도 부모가 반납한다. */
+        return TID_ERROR; /* 스레드 생성 실패를 반환한다. */
+    } /* 스레드 생성 실패 처리를 끝낸다. */
+    status->tid = tid; /* 반환할 자식 번호와 종료 기록을 연결한다. */
+    sema_down (&start->completed); /* 파일 시스템 락을 보유하지 않은 상태로 복제 결과를 기다린다. */
+    bool success = start->success; /* 전달 객체를 해제하기 전에 결과를 지역 변수로 복사한다. */
+    free (start); /* 자식은 완료 알림 뒤 이 객체를 다시 사용하지 않는다. */
+    if (!success) { /* 자식은 만들어졌지만 자원 복제가 실패한 경우다. */
+        list_remove (&status->elem); /* 실패한 fork를 wait 가능한 자식으로 남기지 않는다. */
+        child_status_put (status); /* 부모 참조만 반납한다. 자식 참조는 자식 종료 경로가 반납한다. */
+        return TID_ERROR; /* 자식 tid 대신 실패를 반환한다. */
+    } /* 복제 실패 처리를 끝낸다. */
+    return tid; /* 성공한 자식의 번호를 부모 사용자 프로그램에 돌려준다. */
+} /* process_fork 정의를 끝낸다. */
+
 
 #ifndef VM
 /* Duplicate the parent's address space by passing this function to the
- * pml4_for_each. This is only for the project 2. */
-static bool
-duplicate_pte (uint64_t *pte, void *va, void *aux) {
-	struct thread *current = thread_current ();
-	struct thread *parent = (struct thread *) aux;
-	void *parent_page;
-	void *newpage;
-	bool writable;
+ * pml4_for_each. This is only for the project 2. 
+ *  Project 2의 즉시 페이지 복제 방식에서 사용한다. */
+/* [YYJ] 부모 사용자 페이지 하나를 자식의 별도 물리 페이지에 복사한다. */
+static bool duplicate_pte (uint64_t *pte, void *va, void *aux) { /* 페이지 순회 콜백이다. */
+    struct thread *current = thread_current (); /* 현재 실행 중인 자식이다. */
+    struct thread *parent = (struct thread *)aux; /* aux로 전달받은 부모 스레드다. */
+    void *parent_page; /* 부모 페이지를 커널에서 접근할 주소다. */
+    void *newpage; /* 자식에게 새로 할당할 페이지 주소다. */
+    bool writable; /* 원본 페이지의 쓰기 가능 여부다. */
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+    /* 1. 커널 가상 주소라면 복제하지 않고 건너뛴다. */
+    if (is_kernel_vaddr (va)) /* 사용자 페이지인지 먼저 구분한다. */
+        return true; /* 건너뛰기는 실패가 아니므로 순회를 계속한다. */
 
 	/* 2. Resolve VA from the parent's page map level 4. */
-	parent_page = pml4_get_page (parent->pml4, va);
+    /* 2. 부모의 페이지 테이블에서 va에 연결된 페이지를 찾는다. */
+    parent_page = pml4_get_page (parent->pml4, va); /* 커널 접근 주소를 얻는다. */
+    if (parent_page == NULL) /* 원본 페이지 조회 실패를 확인한다. */
+        return false; /* 페이지 복제 순회를 중단한다. */
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+    /* 3. 자식 전용 사용자 페이지를 할당한다. */
+    newpage = palloc_get_page (PAL_USER); /* 사용자 메모리 풀에서 할당한다. */
+    if (newpage == NULL) /* 메모리 할당 실패를 확인한다. */
+        return false; /* 아직 새 페이지가 없으므로 바로 실패를 반환한다. */
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+    /* 4. 페이지 내용을 복사하고 원본의 쓰기 권한을 확인한다. */
+    memcpy (newpage, parent_page, PGSIZE); /* 한 페이지 전체를 복사한다. */
+    writable = is_writable (pte) != 0; /* 원본 PTE의 쓰기 권한을 읽는다. */
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
-	 *    permission. */
-	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
+	     permission. */
+    /* 5. 자식의 동일한 가상 주소에 새 페이지를 연결한다. */
+    if (!pml4_set_page (current->pml4, va, newpage, writable)) { /* 매핑을 시도한다. */
 		/* 6. TODO: if fail to insert page, do error handling. */
-	}
-	return true;
-}
-#endif
+        /* 6. 매핑 실패 시 아직 연결하지 못한 페이지를 직접 해제한다. */
+        palloc_free_page (newpage); /* 주소 공간에 연결되지 않은 할당을 반납한다. */
+        return false; /* 앞서 매핑한 페이지는 자식의 종료 경로에서 정리한다. */
+    } /* 매핑 실패 처리를 끝낸다. */
+    return true; /* 매핑한 페이지는 이제 자식 주소 공간이 소유한다. */
+} 
+#endif /* Project 2 전용 복제 구간을 끝낸다. */
 
 /* A thread function that copies parent's execution context.
  * Hint) parent->tf does not hold the userland context of the process.
  *       That is, you are required to pass second argument of process_fork to
  *       this function. */
-static void
-__do_fork (void *aux) {
-	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
-	struct thread *current = thread_current ();
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
-	bool succ = true;
+/* [YYJ] 새 자식에서 부모의 사용자 실행 상태를 복제한다. */
+static void __do_fork (void *aux) { /* 스레드 시작 함수 형식에 맞춰 void *를 받는다. */
+    struct intr_frame if_; /* 자식이 사용자 모드로 복귀할 실행 문맥이다. */
+    struct fork_start_info *start = aux; /* 부모가 만든 전달 객체다. */
+    struct thread *parent = start->parent; /* 복제할 부모 스레드 주소다. */
+    struct thread *current = thread_current (); /* 현재 실행 중인 자식이다. */
 
-	/* 1. Read the cpu context to local stack. */
-	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+    /* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
+    /* TODO [YYJ 번역]: process_fork가 받은 사용자 실행 문맥을 전달받는다. */
+    struct intr_frame *parent_if = &start->frame; /* 부모가 복사해 둔 사용자 레지스터다. */
+    bool succ = true; /* 자원 복제 성공 여부를 보관한다. */
 
-	/* 2. Duplicate PT */
-	current->pml4 = pml4_create();
-	if (current->pml4 == NULL)
-		goto error;
+    /* TODO [YYJ 추가]: 실패하더라도 종료 기록을 정리할 수 있도록 연결한다. */
+    current->as_child = start->status; /* 자식이 소유할 종료 기록 참조를 연결한다. */
+    current->is_user_process = false; /* 준비 실패한 자식의 종료 메시지는 출력하지 않는다. */
 
-	process_activate (current);
-#ifdef VM
+    process_init (); /* 자원 복제 전에 기존 공통 초기화를 수행한다. */
+
+    /* 1. Read the cpu context to local stack. */
+    /* TODO [YYJ 번역]: 부모의 사용자 실행 문맥을 자식의 지역 변수로 복사한다. */
+    memcpy (&if_, parent_if, sizeof (struct intr_frame)); /* 레지스터 값을 실제로 복사한다. */
+
+    /* 2. Duplicate PT */
+    /* TODO [YYJ 번역]: 자식의 페이지 테이블을 생성하고 부모의 주소 공간을 복제한다. */
+    current->pml4 = pml4_create (); /* 자식 전용 페이지 테이블을 만든다. */
+    if (current->pml4 == NULL) /* 페이지 테이블 생성 실패를 검사한다. */
+        goto error; /* 공통 실패 알림·종료 경로로 이동한다. */
+
+	process_activate (current);  /* 자식의 주소 공간과 커널 진입 스택 정보를 활성화한다. */
+
+	#ifdef VM
 	supplemental_page_table_init (&current->spt);
 	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
 		goto error;
-#else
-	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
-		goto error;
-#endif
+	#else /* 현재 Project 2에서는 사용자 페이지를 즉시 복제한다. */
+		if (!pml4_for_each (parent->pml4, duplicate_pte, parent)) /* 각 페이지를 duplicate_pte로 복제한다. */
+			goto error; /* 한 페이지라도 실패하면 전체 fork를 실패 처리한다. */
+	#endif /* 주소 공간 복제 방식의 분기를 끝낸다. */
 
 	/* TODO: Your code goes here.
 	 * TODO: Hint) To duplicate the file object, use `file_duplicate`
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
-
-	process_init ();
+    /* TODO [YYJ 번역]:
+     * 파일 객체 복제에는 include/filesys/file.h의 file_duplicate를 사용한다.
+     * 자식의 자원 복제 성공 여부가 확정되기 전까지 부모는 fork에서 반환하면 안 된다. */
+    lock_acquire (&filesys_lock); /* 파일 객체 복제를 공통 락으로 보호한다. */
+    succ = process_duplicate_files (parent); /* 부모 FD와 실행 파일 보유권을 복제한다. */
+    lock_release (&filesys_lock); /* 성공·실패와 관계없이 락을 반납한다. */
+	// process_init ();
 
 	/* Finally, switch to the newly created process. */
-	if (succ)
-		do_iret (&if_);
-error:
-	thread_exit ();
-}
+	// if (succ)
+	// 	do_iret (&if_);
+    if (!succ) /* 파일 복제 실패를 검사한다. */
+        goto error; /* 부분 복제한 자원은 자식 종료 경로에서 정리한다. */
+
+    /* TODO [YYJ 추가]: 자식 반환값을 설정하고 부모에게 복제 성공을 알린다. */
+    if_.R.rax = 0; /* 자식에게 보이는 fork 반환값은 0이다. */
+    current->is_user_process = true; /* 사용자 실행 준비가 끝났다고 표시한다. */
+
+    /* Finally, switch to the newly created process. */
+    /* TODO [YYJ 번역]: 준비된 자식의 실행 문맥으로 사용자 코드에 복귀한다. */
+    if (succ) { /* 모든 자원 복제가 성공한 경우다. */
+        start->success = true; /* 부모가 확인할 성공 결과를 먼저 기록한다. */
+        sema_up (&start->completed); /* 부모를 깨운다. 이후 start에 다시 접근하지 않는다. */
+        do_iret (&if_); /* 복제한 레지스터로 자식의 사용자 코드에 복귀한다. */
+        NOT_REACHED (); /* 정상적으로 사용자 모드에 복귀하면 도달하지 않는다. */
+    } /* 성공 경로를 끝낸다. */
+
+error: /* 모든 복제 실패가 모이는 공통 경로다. */
+	// thread_exit ();
+    /* TODO [YYJ 추가]: 실패해도 부모에게 알리고 자식의 부분 자원을 정리한다. */
+    start->success = false; /* 부모가 TID_ERROR를 반환하도록 실패를 기록한다. */
+    sema_up (&start->completed); /* 실패 시에도 부모의 대기를 반드시 해제한다. */
+    process_terminate (-1); /* 이후 start를 읽지 않고 기존 종료 경로로 정리한다. */
+}	 /* __do_fork 정의를 끝낸다. */
+/* process_init()는 현재 실질적인 초기화가 없는 기존 함수다. FD 목록은 아래 
+thread.c 초기화 코드에서 스레드 생성 시 준비하고 부모 FD는 완료 알림 전에 
+복제한다. 성공 알림 이후에 복제하면 부모가 FD를 닫거나 변경할 수 있어 잘못된다. */
 
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
@@ -328,7 +444,11 @@ process_exec (void *f_name) {
 	// /* And then load the binary */
     /* 전체 명령어가 아니라 첫 단어인 실행 파일 이름을 전달한다. */
 	// success = load (file_name, &_if);
-    success = load(argv[0], &_if);
+    lock_acquire (&filesys_lock); /* [JE/YYJ] ELF 열기·읽기·닫기 중 다른 파일 시스템 호출을 막는다. */
+	success = load (argv[0], &_if); /* [YJH] 기존 로더가 실행 파일과 사용자 스택을 준비한다. */
+	lock_release (&filesys_lock); /* load가 성공하든 실패하든 여기서 락을 반납한다. */
+	/* 현재 load 내부에서 락을 잡지 않으므로 위 위치에서 한 번만 잡는다. JE가 load 내부에 같은
+	락을 넣으면 중복 획득을 제거해야 한다. process_wait()와 fork 완료 대기 중에는 이 락을 보유하지 않는다. */
 
 	// /* If load failed, quit. */
 	// palloc_free_page (file_name);
@@ -371,10 +491,8 @@ int process_wait (tid_t child_tid UNUSED) {
 	/* [YYJ] 직접 만든 자식의 종료를 한 번 기다리고 종료값을 받는다. */
     struct thread *curr = thread_current();
 
-    for (struct list_elem *e = list_begin(&curr->children);
-         e != list_end(&curr->children);
-         e = list_next(e)) {
-
+    for (struct list_elem *e = list_begin(&curr->children); e != list_end(&curr->children); e = list_next(e)) 
+	{
         struct child_status *status =
             list_entry(e, struct child_status, elem);
 
@@ -411,6 +529,8 @@ void process_exit (void) {
     /* 사용자 프로세스의 종료 메시지만 출력한다. */
     if (curr->is_user_process)
         printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+
+	process_close_all_files (); /* [YYJ] 부모에게 종료를 알리기 전에 일반 FD와 기록을 모두 정리한다. */
 
     /* 기존 주소 공간 정리 순서는 유지한다. */
     process_cleanup();
@@ -608,11 +728,98 @@ static void child_status_put(struct child_status *status) {
         free(status); /* malloc()으로 받은 메모리를 반납한다. */
 }
 
+/* [YYJ] 조회만 한다. 반환 포인터를 사용하는 동안 호출자가 filesys_lock을 유지한다. */
+struct file *process_get_file (int fd) { /* 현재 프로세스의 FD에 대응하는 파일을 찾는다. */
+    struct list *files = &thread_current ()->open_files; /* 현재 프로세스의 목록을 얻는다. */
+    for (struct list_elem *e = list_begin (files); e != list_end (files); e = list_next (e)) { /* 기록들을 순회한다. */
+        struct process_file *entry = list_entry (e, struct process_file, elem); /* 목록 요소에서 실제 기록을 얻는다. */
+        if (entry->fd == fd) /* 요청 번호와 같은지 비교한다. */
+            return entry->file; /* 소유권 이전 없이 열린 파일 주소를 반환한다. */
+    } /* 검색을 끝낸다. */
+    return NULL; /* 이 프로세스에 없는 FD다. */
+} /* process_get_file 정의를 끝낸다. */
+
+/* [YYJ] 빈 번호 중 가장 작은 2 이상의 번호를 배정한다. 호출자는 filesys_lock을 보유한다. */
+int process_add_file (struct file *file) { /* 성공 때만 file의 소유권을 가져온다. */
+    struct process_file *entry = malloc (sizeof *entry); /* 새 FD 기록 하나를 할당한다. */
+    if (entry == NULL) /* 기록 할당 실패를 확인한다. */
+        return -1; /* 파일은 호출자가 닫도록 소유권을 유지시킨다. */
+    int fd = 2; /* 표준 입력 0과 표준 출력 1을 건너뛴다. */
+    while (process_get_file (fd) != NULL) { /* 이미 쓰는 번호이면 다음 번호를 찾는다. */
+        if (fd == INT32_MAX) { /* int 번호를 증가시켜 오버플로시키지 않도록 검사한다. */
+            free (entry); /* 아직 등록하지 않은 기록을 반납한다. */
+            return -1; /* 표현 가능한 FD 번호가 없음을 알린다. */
+        } /* FD 범위 초과 처리를 끝낸다. */
+        fd++; /* 다음 번호를 검사한다. */
+    } /* 사용하지 않는 번호를 찾았다. */
+    entry->fd = fd; /* 배정한 번호를 기록한다. */
+    entry->file = file; /* 성공 경로에서 파일 보유권을 기록으로 넘긴다. */
+    list_push_back (&thread_current ()->open_files, &entry->elem); /* 현재 프로세스의 목록에 등록한다. */
+    return fd; /* 사용자에게 전달할 번호를 반환한다. */
+} /* process_add_file 정의를 끝낸다. */
+
+/* [YYJ] 호출자가 filesys_lock을 보유한 상태에서 FD 하나를 닫는다. */
+void process_close_file (int fd) { /* 유효하지 않은 번호는 아무 작업 없이 무시한다. */
+    struct list *files = &thread_current ()->open_files; /* 내 FD 목록만 검색한다. */
+    for (struct list_elem *e = list_begin (files); e != list_end (files); e = list_next (e)) { /* 각 기록을 확인한다. */
+        struct process_file *entry = list_entry (e, struct process_file, elem); /* 실제 FD 기록을 얻는다. */
+        if (entry->fd == fd) { /* 닫을 번호를 찾았는지 확인한다. */
+            list_remove (&entry->elem); /* 해제할 기록이 목록에 남지 않도록 먼저 제거한다. */
+            file_close (entry->file); /* 이 프로세스가 보유한 파일 객체만 닫는다. */
+            free (entry); /* FD 기록 자체도 반납한다. */
+            return; /* 해제한 요소로 순회를 계속하지 않는다. */
+        } /* 일치 여부 분기를 끝낸다. */
+    } /* 유효하지 않은 FD면 아무 기록도 변경하지 않는다. */
+} /* process_close_file 정의를 끝낸다. */
+
+/* [YYJ] 자식이 filesys_lock을 잡고 호출한다. 일부 실패 시 정리는 자식의 process_exit가 맡는다. */
+static bool process_duplicate_files (struct thread *parent) { /* 원본은 fork 완료를 기다리는 부모다. */
+    struct thread *current = thread_current (); /* 복제한 파일을 소유할 자식을 얻는다. */
+    if (parent->running_file != NULL) { /* 부모가 실행 파일 보유권을 가지고 있는지 확인한다. */
+        current->running_file = file_duplicate (parent->running_file); /* 실행 파일의 쓰기 금지 상태도 함께 복제한다. */
+        if (current->running_file == NULL) /* 실행 파일 복제 실패를 확인한다. */
+            return false; /* 부모가 성공한 fork로 오인하지 않도록 실패를 반환한다. */
+    } /* 실행 파일 보유권 복제를 끝낸다. */
+    for (struct list_elem *e = list_begin (&parent->open_files); e != list_end (&parent->open_files); e = list_next (e)) { /* 부모의 일반 FD를 순회한다. */
+        struct process_file *source = list_entry (e, struct process_file, elem); /* 부모 FD 기록을 얻는다. */
+        struct process_file *copy = malloc (sizeof *copy); /* 자식 FD 기록을 별도로 만든다. */
+        if (copy == NULL) /* 기록 할당 실패를 확인한다. */
+            return false; /* 앞서 복제한 기록은 자식 종료 시 정리한다. */
+        copy->fd = source->fd; /* 중간에 빈 번호가 있더라도 부모의 정확한 FD 번호를 보존한다. */
+        copy->file = file_duplicate (source->file); /* 복제 시점 파일 위치를 가진 별도 파일 객체를 만든다. */
+        if (copy->file == NULL) { /* 파일 객체 복제 실패를 검사한다. */
+            free (copy); /* 목록에 넣지 못한 기록을 즉시 반납한다. */
+            return false; /* 기존 복제 기록은 종료 경로에서 정리하게 한다. */
+        } /* 파일 복제 실패 처리를 끝낸다. */
+        list_push_back (&current->open_files, &copy->elem); /* 완성된 기록만 자식 목록에 등록한다. */
+    } /* 모든 일반 FD의 복제를 끝낸다. */
+    return true; /* 실행 파일과 모든 FD를 복제했다. */
+} /* process_duplicate_files 정의를 끝낸다. */
+
+/* [YYJ] process_exit에서 호출한다. exec의 주소 공간 교체에서는 호출하지 않는다. */
+static void process_close_all_files (void) { /* 현재 프로세스의 일반 FD 전부를 정리한다. */
+    struct list *files = &thread_current ()->open_files; /* 종료할 프로세스의 목록을 얻는다. */
+    lock_acquire (&filesys_lock); /* file_close의 파일 시스템 접근을 보호한다. */
+    while (!list_empty (files)) { /* 모든 FD 기록이 없어질 때까지 반복한다. */
+        struct list_elem *e = list_pop_front (files); /* 목록에서 먼저 기록을 분리한다. */
+        struct process_file *entry = list_entry (e, struct process_file, elem); /* 분리한 실제 기록을 얻는다. */
+        file_close (entry->file); /* 보유하던 파일 객체를 닫는다. */
+        free (entry); /* 기록 메모리도 반납한다. */
+    } /* 일반 FD 정리를 끝낸다. */
+    lock_release (&filesys_lock); /* 종료 알림과 참조 반납 전에 락을 해제한다. */
+} /* process_close_all_files 정의를 끝낸다. */
 
 /* Free the current process's resources. */
 static void
 process_cleanup (void) {
 	struct thread *curr = thread_current ();
+
+    if (curr->running_file != NULL) { /* 이전 실행 파일 보유권이 있는 경우만 정리한다. */
+        lock_acquire (&filesys_lock); /* 실행 파일 close도 공통 락으로 보호한다. */
+        file_close (curr->running_file); /* 이 프로세스의 쓰기 금지 보유권을 반납한다. */
+        curr->running_file = NULL; /* 다음 정리에서 같은 파일을 다시 닫지 않도록 한다. */
+        lock_release (&filesys_lock); /* 주소 공간 정리 전에 파일 시스템 락을 반납한다. */
+    } /* 실행 파일 정리를 끝낸다. */
 
 #ifdef VM
 	supplemental_page_table_kill (&curr->spt);
@@ -732,6 +939,8 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	}
 
+	file_deny_write (file); /* [YYJ] 검사·로딩 중에도 실행 파일이 변경되지 않도록 쓰기를 금지한다. */
+
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
@@ -807,6 +1016,8 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
 
+	t->running_file = file; /* 성공한 실행 파일의 보유권을 현재 프로세스로 넘긴다. */
+	file = NULL; /* done의 file_close가 성공한 실행 파일을 곧바로 닫지 않도록 지역 보유권을 비운다. */
 	success = true;
 
 done:
@@ -814,6 +1025,8 @@ done:
 	file_close (file);
 	return success;
 }
+/* 로딩 실패는 지역 file을 닫고, 성공은 running_file로 유지한다. 이후 스택 인자 구성 실패도 
+process_terminate→process_exit→process_cleanup이 실행 파일을 닫는다. fork는 file_duplicate가 기존 deny_write 상태를 복제한다. */
 
 /*
  * TODO [YJH]: setup_arguments
