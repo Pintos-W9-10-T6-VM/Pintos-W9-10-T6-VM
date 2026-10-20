@@ -18,6 +18,7 @@
 #include "filesys/file.h" /* 파일 읽기·쓰기·닫기 함수를 사용한다. */
 #include "devices/input.h" /* 표준 입력에서 input_getc를 사용한다. */
 #include <debug.h> /* NOT_REACHED를 명시적으로 가져온다. */
+#include "threads/init.h" /* [YJH] power_off()로 시스템 전원을 끄기 위해 사용한다. */
 struct lock filesys_lock; /* [JE/YYJ] 파일 로딩과 파일 시스템 호출이 함께 사용할 락이다. */
 
 void syscall_entry (void);
@@ -231,6 +232,8 @@ syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 복귀
     case SYS_CREATE:
         f->R.rax = sys_create ((const char *) f->R.rdi, (unsigned) f->R.rsi);
         break;
+    case SYS_HALT: /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
+        power_off (); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
     default: /* 아직 지원하지 않는 번호를 요청한 경우다. */
 	    // thread_exit();
         process_terminate (-1); /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
