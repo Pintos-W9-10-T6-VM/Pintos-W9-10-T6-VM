@@ -83,6 +83,8 @@ typedef int tid_t;
 /* [YYJ] 실제 내용은 process.c에 정의하며 여기서는 포인터로 사용한다. */
 struct child_status;
 
+struct file; /* [YYJ] 파일 구조체 본체 대신 포인터만 사용하기 위한 전방 선언이다. */
+
 /* 멤버 'elem'는 세 가지 용도로 사용됩니다.
  * 실행 큐(thread.c)의 요소이거나,
  * 수면 리스트(thread.c)의 요소이거나,
@@ -131,6 +133,8 @@ struct thread
     bool is_user_process;	/* 사용자 프로세스인지 표시 */
     struct child_status *as_child;	/* 부모와 공유하는 나의 종료 기록 주소 */
     struct list children;	/* 내가 만든 자식들의 종료 기록 목록 */
+    struct list open_files; /* [YYJ] 이 프로세스가 보유한 FD 기록들의 목록이다. */
+    struct file *running_file; /* [YYJ] 실행 중 쓰기 금지를 유지할 별도 실행 파일 핸들이다. */
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */

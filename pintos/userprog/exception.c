@@ -5,7 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "intrinsic.h"
-#include "userprog/process.h"
+#include "userprog/process.h" /* 사용자 프로세스 종료값을 명시하는 process_terminate 선언이다. */
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -87,7 +87,9 @@ kill (struct intr_frame *f) {
 			printf ("%s: dying due to interrupt %#04llx (%s).\n",
 					thread_name (), f->vec_no, intr_name (f->vec_no));
 			intr_dump_frame (f);
-			thread_exit ();
+			// thread_exit ();
+			process_terminate (-1); /* [YYJ] 사용자 예외 종료를 부모가 wait()에서 -1로 확인하게 한다. */
+
 
 		case SEL_KCSEG:
 			/* Kernel's code segment, which indicates a kernel bug.
@@ -140,9 +142,6 @@ page_fault (struct intr_frame *f) {
 	not_present = (f->error_code & PF_P) == 0;
 	write = (f->error_code & PF_W) != 0;
 	user = (f->error_code & PF_U) != 0;
-
-	if (user)
-		process_terminate(-1);
 
 #ifdef VM
 	/* For project 3 and later. */

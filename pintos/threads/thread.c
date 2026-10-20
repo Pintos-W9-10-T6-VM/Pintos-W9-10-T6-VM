@@ -904,6 +904,9 @@ init_thread(struct thread *t, const char *name, int priority)
     t->is_user_process = false;
     t->as_child = NULL;
     list_init(&t->children);
+    list_init (&t->open_files); /* [YYJ] 커널 스레드도 종료 정리가 안전하도록 빈 목록으로 시작한다. */
+    t->running_file = NULL; /* 아직 실행 파일 보유권이 없다고 초기화한다. */
+
 #endif
 
 	t->status = THREAD_BLOCKED;
