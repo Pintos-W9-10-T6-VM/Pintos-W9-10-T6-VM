@@ -252,6 +252,20 @@ syscall_handler(struct intr_frame *f) {
 		break;
 	}
 
+	case SYS_FORK: {
+		// rdi: 새 프로세스(스레드)의 이름이 있는 사용자 메모리 번지
+		char *name = copy_user_string((const char *)f->R.rdi);
+
+		if (name == NULL)
+			process_terminate(-1);
+
+		// 두 번째 인자 f: 부모가 멈춘 순간의 레지스터 사진
+		f->R.rax = process_fork(name, f);
+
+		palloc_free_page(name);
+		break;
+	}
+
 	default:
         thread_exit();
     }

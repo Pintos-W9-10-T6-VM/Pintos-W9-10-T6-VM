@@ -186,13 +186,48 @@ static void initd (void *f_name) {
 
 }
 
+// fork 때 부모가 지식에게 넘기는 꾸러미
+struct fork_info {
+	struct thread *parent;			// 부모 스레드
+	struct intr_frame parent_if;	// 부모의 레지스터 사진 (복사본)
+	struct semaphore done;			// 자식이 복사를 끝냈다는 알림
+	struct child_status *status;	// 자식의 종료 기록
+};
+
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
 tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
-	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+process_fork(const char *name, struct intr_frame *if_)
+{
+	struct fork_info info;
+	info.parent = thread_current();
+
+	// 부모의 레지스터 사진을 꾸러미 안에 복사해둔다
+	memcpy(&info.parent_if, if_, sizeof(struct intr_frame));
+
+	// 알림용 세마포어. 처음엔 알림이 없으니 값은 0
+	sema_init(&info.done, 0);
+
+	// 종료 기록을 만들고 부모의 자식 목록에 넣는다
+	struct child_status *status = child_status_create();
+	if (status == NULL)
+		return TID_ERROR;
+	info.status = status;
+	list_push_back(&thread_current()->children, &status->elem);
+
+	tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, &info);
+	if (tid == TID_ERROR) {
+		// 자식을 못 만들었으니 부모가 두 몫 모두 정리한다
+		list_remove(&status->elem);
+		child_status_put(status);
+		child_status_put(status);
+		return TID_ERROR;
+	}
+	status->tid = tid;	// 이 기록이 어느 자식의 것인지 적는다
+
+	// 자식이 복사를 끝날 때까지 잠든다
+	sema_down(&info.done);
+	return tid;
 }
 
 #ifndef VM
@@ -207,21 +242,30 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	bool writable;
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	if (is_kernel_vaddr (va))
+		return true;
 
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+	newpage = palloc_get_page(PAL_USER);
+	if (newpage == NULL)
+		return false;
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+	memcpy(newpage, parent_page, PGSIZE);
+	writable = is_writable(pte);
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
+		palloc_free_page(newpage);
+		return false;
 	}
 	return true;
 }
@@ -233,15 +277,18 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  *       this function. */
 static void
 __do_fork (void *aux) {
+	struct fork_info *info = aux;			// 부모가 넘긴 꾸러미
 	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
-	struct thread *current = thread_current ();
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct thread *parent = info->parent;
+	struct thread *current = thread_current();
 	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
-	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+	memcpy (&if_, &info->parent_if, sizeof (struct intr_frame));
+	if_.R.rax = 0;		// 자식에게 fork()는 0을 돌려준다
+
+	current->as_child = info->status;	// 내 종료 기록
+	current->is_user_process = true;	// 종료 메시지를 찍게 한다
 
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
@@ -266,11 +313,15 @@ __do_fork (void *aux) {
 
 	process_init ();
 
+	// 복사를 마쳤으니 부모를 깨운다
+	sema_up(&info->done);
+
 	/* Finally, switch to the newly created process. */
 	if (succ)
 		do_iret (&if_);
 error:
-	thread_exit ();
+	sema_up(&info->done);	// 실패해도 부모가 영원히 자지 않게 깨운
+	thread_exit();
 }
 
 /* Switch the current execution context to the f_name.
