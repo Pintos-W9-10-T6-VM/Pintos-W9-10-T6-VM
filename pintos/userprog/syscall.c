@@ -188,6 +188,25 @@ char *name = user_string_copy (user_name);
   return success;
 }
 
+//[JE]
+static bool sys_remove (const char *user_name){
+char *name = user_string_copy (user_name);
+    if (name == NULL) 
+        return false; 
+
+    //락 획득    
+    lock_acquire (&filesys_lock); 
+
+    //filesys_remove 호출 → 결과를 변수에 저장
+    bool success = filesys_remove(name); 
+    //락 해제
+    lock_release(&filesys_lock);
+    palloc_free_page(name);
+
+  //결과 반환
+  return success;
+}
+
 /* The main system call interface */
 /* [JE/YYJ] 사용자 요청 번호를 해석하고 프로세스 관리 함수에 연결한다. */
 void
@@ -231,6 +250,9 @@ syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 복귀
         break; /* 기다린 결과를 가지고 사용자 코드로 복귀한다. */
     case SYS_CREATE:
         f->R.rax = sys_create ((const char *) f->R.rdi, (unsigned) f->R.rsi);
+        break;
+    case SYS_REMOVE:
+        f->R.rax = sys_remove ((const char *) f->R.rdi);
         break;
     case SYS_HALT: /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
         power_off (); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
