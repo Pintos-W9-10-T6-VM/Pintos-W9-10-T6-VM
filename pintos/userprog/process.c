@@ -744,17 +744,28 @@ int process_add_file (struct file *file) { /* 성공 때만 file의 소유권을
     struct process_file *entry = malloc (sizeof *entry); /* 새 FD 기록 하나를 할당한다. */
     if (entry == NULL) /* 기록 할당 실패를 확인한다. */
         return -1; /* 파일은 호출자가 닫도록 소유권을 유지시킨다. */
+    /* [YJH] 목록 전체를 번호마다 다시 훑으면 열린 파일이 n개일 때 번호 하나를 정하는 데 약 n*n/2번 비교한다.
+     * [YJH] multi-oom은 세대마다 파일을 126개씩 열고 자식이 부모의 열린 파일을 물려받아 n이 천 단위로 커지므로,
+     *       fd 배정이 제곱으로 느려져 600초 안에 끝나지 않았다(세대당 8.6초에서 13.9초로 증가).
+     * [YJH] open_files를 fd 오름차순으로 유지하고 한 번만 훑어 가장 작은 빈 번호를 찾는다. 비교 횟수는 약 n번이다.
+     * [YJH] 순서를 유지하는 조건: 이 목록에 기록을 넣는 곳은 여기와 process_duplicate_files뿐이고,
+     *       후자는 부모 목록의 순서 그대로 복사하므로 오름차순이 깨지지 않는다. 닫기는 기록을 지우기만 한다. */
+    struct list *files = &thread_current ()->open_files; /* [YJH] 번호 순으로 유지되는 현재 프로세스의 FD 목록이다. */
     int fd = 2; /* 표준 입력 0과 표준 출력 1을 건너뛴다. */
-    while (process_get_file (fd) != NULL) { /* 이미 쓰는 번호이면 다음 번호를 찾는다. */
+    struct list_elem *e; /* [YJH] 새 기록을 끼워 넣을 자리를 가리킨다. 처음으로 번호가 어긋나는 칸이거나 목록의 끝이다. */
+    for (e = list_begin (files); e != list_end (files); e = list_next (e)) { /* [YJH] 목록을 한 번만 훑는다. */
+        struct process_file *current_entry = list_entry (e, struct process_file, elem); /* [YJH] 현재 칸의 FD 기록이다. */
+        if (current_entry->fd != fd) /* [YJH] 번호 순 목록이므로 기대한 번호와 다른 첫 칸 앞이 가장 작은 빈 번호다. */
+            break; /* [YJH] 빈 번호 fd를 찾았다. */
         if (fd == INT32_MAX) { /* int 번호를 증가시켜 오버플로시키지 않도록 검사한다. */
             free (entry); /* 아직 등록하지 않은 기록을 반납한다. */
             return -1; /* 표현 가능한 FD 번호가 없음을 알린다. */
         } /* FD 범위 초과 처리를 끝낸다. */
-        fd++; /* 다음 번호를 검사한다. */
-    } /* 사용하지 않는 번호를 찾았다. */
+        fd++; /* [YJH] 이 번호는 쓰고 있으므로 다음 번호를 기대한다. */
+    } /* [YJH] 빈 번호를 찾았거나 목록 끝에 도달했다. */
     entry->fd = fd; /* 배정한 번호를 기록한다. */
     entry->file = file; /* 성공 경로에서 파일 보유권을 기록으로 넘긴다. */
-    list_push_back (&thread_current ()->open_files, &entry->elem); /* 현재 프로세스의 목록에 등록한다. */
+    list_insert (e, &entry->elem); /* [YJH] e 앞에 넣어 번호 순서를 유지한다. 끝까지 훑었으면 목록 맨 뒤에 들어간다. */
     return fd; /* 사용자에게 전달할 번호를 반환한다. */
 } /* process_add_file 정의를 끝낸다. */
 
