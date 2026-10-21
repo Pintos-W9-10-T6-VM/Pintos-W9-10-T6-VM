@@ -218,6 +218,7 @@ static unsigned sys_tell (int fd) {
     lock_release (&filesys_lock); /* 성공과 실패 모두 락을 반납한다. */
 
     return result; /* 현재 위치 또는 unsigned 형식의 오류값을 반환한다. */
+}
 //[JE]
 static bool sys_create(const char *user_name, unsigned initial_size){
 
@@ -239,69 +240,84 @@ char *name = user_string_copy (user_name);
   return success;
 }
 
+//[JE]
+static bool sys_remove (const char *user_name){
+char *name = user_string_copy (user_name);
+    if (name == NULL) 
+        return false; 
+
+    //락 획득    
+    lock_acquire (&filesys_lock); 
+
+    //filesys_remove 호출 → 결과를 변수에 저장
+    bool success = filesys_remove(name); 
+    //락 해제
+    lock_release(&filesys_lock);
+    palloc_free_page(name);
+
+  //결과 반환
+  return success;
+}
+
 /* The main system call interface */
 /* [JE/YYJ] 사용자 요청 번호를 해석하고 프로세스 관리 함수에 연결한다. */
 void syscall_handler(struct intr_frame *f) { /* f는 사용자 레지스터와 복귀 위치를 담는다. */
     switch (f->R.rax) { /* 진입 시 RAX에 저장된 시스템 콜 번호로 분기한다. */
-        case SYS_HALT: { /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
-            power_off (); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
-            break; 
-        }
-        case SYS_EXIT: /* 사용자가 명시적으로 종료를 요청한 경우다. */
-            process_terminate ((int) f->R.rdi); /* 부호 있는 int 종료값을 기록하고 종료한다. 반환하지 않는다. */
-        case SYS_FORK: { /* 이 분기의 지역 변수들이 다른 case와 섞이지 않도록 블록을 연다. */
-            char *name = user_string_copy ((const char *) f->R.rdi); /* 사용자 자식 이름을 안전한 커널 페이지에 복사한다. */
-            if(name == NULL) { /* 이름 복사용 페이지 할당 실패를 처리한다. */
-                f->R.rax = TID_ERROR; /* 자식을 만들지 않고 부모에게 실패를 반환한다. */
-                break; 
-            } /* 이름 페이지 할당 실패 처리를 끝낸다. */
-            tid_t tid = process_fork (name, f); /* 사용자 프레임을 전달하고 자식 복제 결과를 기다린다. */
-            palloc_free_page (name); /* thread_create가 이름을 복사했으므로 임시 페이지는 더 필요 없다. */
-            f->R.rax = tid; /* 부모에게 자식 PID 또는 TID_ERROR를 반환한다. */
-            break; 
-        } 
-        case SYS_EXEC: { /* exec 명령어를 보관할 지역 변수 범위를 연다. */
-            char *cmdline = user_string_copy ((const char *) f->R.rdi); /* 이전 사용자 주소 공간을 없애기 전에 명령어를 복사한다. */
-            if(cmdline == NULL) /* 커널 명령어 페이지 할당 실패를 확인한다. */
-                process_terminate (-1); /* exec 준비 실패 시 현재 프로세스를 종료한다. */
-            if(process_exec (cmdline) < 0) /* 페이지 소유권을 넘긴다. 성공 시 돌아오지 않고 실패 시 내부에서 페이지를 정리한다. */
-                process_terminate (-1); /* 실행 실패는 기존 프로그램으로 복귀하지 않고 -1로 종료한다. */
-            NOT_REACHED (); /* 기존 process_exec 계약상 성공·실패 모두 여기로 정상 복귀하지 않는다. */
-        } 
-        case SYS_WAIT: /* 자식의 종료 결과를 요청한 경우다. */
-            f->R.rax = process_wait ((tid_t) f->R.rdi); /* 직접 자식을 한 번만 기다리는 기존 함수를 호출한다. */
-            break; /* 기다린 결과를 가지고 사용자 코드로 복귀한다. */
-        case SYS_CREATE:
-            /* JE */
-            break;
-        case SYS_REMOVE:
-            /* JE */
-            break;
-        case SYS_OPEN: /* 일반 파일 열기를 요청한 경우다. */
-            f->R.rax = sys_open ((const char *) f->R.rdi); /* 파일 이름을 검증하고 FD를 반환한다. */
-            break; /* open 분기를 끝낸다. */
-        case SYS_FILESIZE: /* 사용자가 파일 크기를 요청한 경우다. */
-            f->R.rax = sys_filesize ((int) f->R.rdi); /* 첫 번째 인자를 int FD로 읽고 결과를 반환 레지스터에 저장한다. */
-            break; /* 다른 시스템 콜 분기를 실행하지 않는다. */
-        case SYS_READ: /* 표준 입력 또는 일반 파일 읽기를 요청한 경우다. */
-            f->R.rax = sys_read ((int) f->R.rdi, (void *) f->R.rsi, (unsigned) f->R.rdx); /* 쓰기 권한 검사 후 읽는다. */
-            break; /* read 분기를 끝낸다. */
-        case SYS_WRITE: /* 기존 표준 출력 시스템 콜을 유지한다. */
-            f->R.rax = sys_write ((int) f->R.rdi, (const void *) f->R.rsi, (unsigned) f->R.rdx); /* fd·버퍼·길이를 전달하고 반환값을 기록한다. */
-            break; /* 다른 시스템 콜 분기로 이어지지 않게 한다. */
-        case SYS_SEEK: /* 파일 위치 변경 요청이다. */
-            sys_seek ((int) f->R.rdi, (unsigned) f->R.rsi); /* FD와 새 위치를 전달한다. */
-            break; /* void 함수이므로 RAX에 반환값을 기록하지 않는다. */
-        case SYS_TELL:  /* 현재 파일 위치 조회 요청이다. */
-            /* Returns the current position in FILE as a byte offset from the start of the file. */
-        //    file_tell(f->R.rdi);
-            f->R.rax = sys_tell ((int) f->R.rdi); /* FD를 전달하고 반환값을 RAX에 기록한다. */
-            break;
-        case SYS_CLOSE: /* 일반 파일 닫기를 요청한 경우다. */
-            sys_close ((int) f->R.rdi); /* 현재 프로세스가 보유한 FD를 닫는다. */
-            break; /* close 분기를 끝낸다. */
-        default: /* 아직 지원하지 않는 번호를 요청한 경우다. */
-            // thread_exit();
-            process_terminate (-1); /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
-        }
+    case SYS_WRITE: /* 기존 표준 출력 시스템 콜을 유지한다. */
+        f->R.rax = sys_write ((int) f->R.rdi, (const void *) f->R.rsi, (unsigned) f->R.rdx); /* fd·버퍼·길이를 전달하고 반환값을 기록한다. */
+        break; /* 다른 시스템 콜 분기로 이어지지 않게 한다. */
+    case SYS_EXIT: /* 사용자가 명시적으로 종료를 요청한 경우다. */
+        process_terminate ((int) f->R.rdi); /* 부호 있는 int 종료값을 기록하고 종료한다. 반환하지 않는다. */
+    case SYS_OPEN: /* 일반 파일 열기를 요청한 경우다. */
+        f->R.rax = sys_open ((const char *) f->R.rdi); /* 파일 이름을 검증하고 FD를 반환한다. */
+        break; /* open 분기를 끝낸다. */
+    case SYS_READ: /* 표준 입력 또는 일반 파일 읽기를 요청한 경우다. */
+        f->R.rax = sys_read ((int) f->R.rdi, (void *) f->R.rsi, (unsigned) f->R.rdx); /* 쓰기 권한 검사 후 읽는다. */
+        break; /* read 분기를 끝낸다. */
+    case SYS_CLOSE: /* 일반 파일 닫기를 요청한 경우다. */
+        sys_close ((int) f->R.rdi); /* 현재 프로세스가 보유한 FD를 닫는다. */
+        break; /* close 분기를 끝낸다. */
+    case SYS_FORK: { /* 이 분기의 지역 변수들이 다른 case와 섞이지 않도록 블록을 연다. */
+        char *name = user_string_copy ((const char *) f->R.rdi); /* 사용자 자식 이름을 안전한 커널 페이지에 복사한다. */
+        if (name == NULL) { /* 이름 복사용 페이지 할당 실패를 처리한다. */
+            f->R.rax = TID_ERROR; /* 자식을 만들지 않고 부모에게 실패를 반환한다. */
+            break; /* fork 분기를 끝낸다. */
+        } /* 이름 페이지 할당 실패 처리를 끝낸다. */
+        tid_t tid = process_fork (name, f); /* 사용자 프레임을 전달하고 자식 복제 결과를 기다린다. */
+        palloc_free_page (name); /* thread_create가 이름을 복사했으므로 임시 페이지는 더 필요 없다. */
+        f->R.rax = tid; /* 부모에게 자식 PID 또는 TID_ERROR를 반환한다. */
+        break; /* fork 분기를 끝낸다. */
+    } /* fork의 지역 변수 범위를 끝낸다. */
+    case SYS_EXEC: { /* exec 명령어를 보관할 지역 변수 범위를 연다. */
+        char *cmdline = user_string_copy ((const char *) f->R.rdi); /* 이전 사용자 주소 공간을 없애기 전에 명령어를 복사한다. */
+        if (cmdline == NULL) /* 커널 명령어 페이지 할당 실패를 확인한다. */
+            process_terminate (-1); /* exec 준비 실패 시 현재 프로세스를 종료한다. */
+        if (process_exec (cmdline) < 0) /* 페이지 소유권을 넘긴다. 성공 시 돌아오지 않고 실패 시 내부에서 페이지를 정리한다. */
+            process_terminate (-1); /* 실행 실패는 기존 프로그램으로 복귀하지 않고 -1로 종료한다. */
+        NOT_REACHED (); /* 기존 process_exec 계약상 성공·실패 모두 여기로 정상 복귀하지 않는다. */
+    } /* exec의 지역 변수 범위를 끝낸다. */
+    case SYS_WAIT: /* 자식의 종료 결과를 요청한 경우다. */
+        f->R.rax = process_wait ((tid_t) f->R.rdi); /* 직접 자식을 한 번만 기다리는 기존 함수를 호출한다. */
+        break; /* 기다린 결과를 가지고 사용자 코드로 복귀한다. */
+    case SYS_CREATE:
+        f->R.rax = sys_create ((const char *) f->R.rdi, (unsigned) f->R.rsi);
+        break;
+    case SYS_REMOVE:
+        f->R.rax = sys_remove ((const char *) f->R.rdi);
+        break;
+    case SYS_FILESIZE:
+        f->R.rax = sys_filesize ((int) f->R.rdi);
+        break;
+    case SYS_SEEK:
+        sys_seek ((int) f->R.rdi, (unsigned) f->R.rsi);
+        break;
+    case SYS_TELL:
+        f->R.rax = sys_tell ((int) f->R.rdi);
+        break;    
+    case SYS_HALT: /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
+        power_off (); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
+    default: /* 아직 지원하지 않는 번호를 요청한 경우다. */
+	    // thread_exit();
+        process_terminate (-1); /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
+    }
 }
