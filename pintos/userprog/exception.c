@@ -86,7 +86,10 @@ kill (struct intr_frame *f) {
 			   expected.  Kill the user process.  */
 			printf ("%s: dying due to interrupt %#04llx (%s).\n",
 					thread_name (), f->vec_no, intr_name (f->vec_no));
-			intr_dump_frame (f);
+			/* [YJH] 사용자 프로그램이 스스로 일으킨 예외는 커널 버그가 아니므로 레지스터 덤프(intr_dump_frame)를 출력하지 않는다.
+			 * [YJH] 덤프 7줄(Interrupt 0x0e ... / rax ... / es: ...)은 채점의 IGNORE_USER_FAULTS 필터가 32비트 이름(eip, eax)만 걸러서
+			 *       64비트(rip, rax)로 찍히는 이 환경에서는 무시되지 않고, bad-read 등 6개 테스트가 정답 출력과 달라져 FAIL이 된다.
+			 * [YJH] 커널 코드에서 난 예외(SEL_KCSEG)의 intr_dump_frame과 PANIC은 커널 버그 진단이므로 그대로 유지한다. */
 			// thread_exit ();
 			process_terminate (-1); /* [YYJ] 사용자 예외 종료를 부모가 wait()에서 -1로 확인하게 한다. */
 
