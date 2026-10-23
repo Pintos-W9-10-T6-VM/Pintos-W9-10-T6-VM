@@ -1,0 +1,15 @@
+-xc
+-std=gnu17
+-nostdinc
+-I.
+-Iinclude/lib
+-Iinclude
+-Iinclude/lib/kernel
+-Ilib/kernel
+-Wall
+-W
+-Wstrict-prototypes
+-Wmissing-prototypes
+-DUSERPROG
+-DFILESYS
+-DVM
