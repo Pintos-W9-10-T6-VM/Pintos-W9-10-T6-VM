@@ -15,6 +15,7 @@
 - [ ] JE
 - [ ] YYJ
 - [ ] YJH
+- [ ] CJG
 - [ ] 통합 · 환경 · 문서
 
 담당 기능:
@@ -49,14 +50,15 @@
 
 ## 📏 컨벤션
 
-상세 기준: [README](https://github.com/Pintos-W8-T7-User/pintos_22.04_lab_docker/blob/main/README.md)
+상세 기준: 코드 스타일은 [CONVENTION.md](https://github.com/Pintos-W9-10-T6-VM/Pintos-W9-10-T6-VM/blob/main/CONVENTION.md), 커밋·PR은 [README](https://github.com/Pintos-W9-10-T6-VM/Pintos-W9-10-T6-VM/blob/main/README.md)
 
 - 커밋 첫 줄: 변경 목적과 결과
 - 커밋 본문: 파일 / Create·Update·Delete·Fix: 함수·항목 / 변경 설명
 - 줄 번호는 선택 사항이며 파일별로 줄을 나눕니다.
-- 필요한 코드 주석: [JE], [YYJ], [YJH] + 동작 이유
+- 필요한 코드 주석: [JE], [YYJ], [YJH], [CJG] + 동작 이유
 - 후속 작업 주석: TODO [브랜치] #이슈: 남은 작업
-- 기존 코드 스타일을 유지하고 관련 없는 포맷 변경은 제외합니다.
+- 코드 스타일은 CONVENTION.md를 따릅니다. 저장 시 자동 포맷되고, `make lint`로 확인합니다.
+- 관련 없는 포맷 변경은 제외합니다.
 - 개인 브랜치 → develop → main 순서로 PR을 만들고 merge commit으로 병합합니다.
 
 ## ✅ 제출 전 확인
