@@ -1,0 +1,27 @@
+# Team naming and brace rules. clangd shows these as live warnings in the
+# editor; `make lint` runs the same checks in the terminal.
+# Only convention checks are on. Bug-finding checks (bugprone-*) are off:
+# kernel code gives them many false positives, which would hide these.
+Checks: '-*,readability-identifier-naming,readability-braces-around-statements'
+CheckOptions:
+  readability-identifier-naming.FunctionCase: lower_case
+  # Ignore patterns must match the whole name.
+  # A leading underscore marks linker or compiler symbols (_start, __divdi3).
+  # A trailing underscore is the Pintos idiom for a raw argument that is cast
+  # into a typed local: `void *buf_` -> `uint8_t *buf = buf_`.
+  readability-identifier-naming.FunctionIgnoredRegexp: '_.*'
+  readability-identifier-naming.VariableCase: lower_case
+  readability-identifier-naming.VariableIgnoredRegexp: '_.*|.*_'
+  readability-identifier-naming.ParameterCase: lower_case
+  readability-identifier-naming.ParameterIgnoredRegexp: '_.*|.*_'
+  readability-identifier-naming.StructCase: lower_case
+  readability-identifier-naming.UnionCase: lower_case
+  readability-identifier-naming.EnumCase: lower_case
+  readability-identifier-naming.EnumConstantCase: UPPER_CASE
+  readability-identifier-naming.TypedefCase: lower_case
+  # Constants are UPPER_CASE. Function-like macros may be lower_case, as in
+  # the kernel (list_entry, pg_ofs). Include guards may start with `_`.
+  # Mixed case is not allowed in new code; the names in the last group are
+  # upstream Pintos names (printf format macros, Phdr, EOChain).
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+  readability-identifier-naming.MacroDefinitionIgnoredRegexp: '^_*[a-z][a-z0-9_]*$|^_+[A-Z0-9_]+$|^(PR[A-Za-z0-9]+|Phdr|EOChain)$'

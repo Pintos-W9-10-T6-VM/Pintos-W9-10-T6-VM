@@ -2,16 +2,24 @@
     "name": "pintos-dev",
     "dockerFile": "Dockerfile",
     "remoteUser": "jungle",
+    "postCreateCommand": "echo \"source ${containerWorkspaceFolder}/pintos/activate\" >> ~/.bashrc",
     "customizations": {
         "vscode": {
             "extensions": [
                 "ms-vscode.cpptools-extension-pack",
                 "ms-vscode.cpptools",
                 "ms-azuretools.vscode-docker",
-                "ms-vscode.makefile-tools"
+                "ms-vscode.makefile-tools",
+                "llvm-vs-code-extensions.vscode-clangd"
             ],
             "settings": {
-                "terminal.integrated.defaultProfile.linux": "bash"
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "C_Cpp.intelliSenseEngine": "disabled",
+                "clangd.path": "/usr/local/bin/clangd",
+                "[c]": {
+                    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
+                    "editor.formatOnSave": true
+                }
             }
         }
     }
