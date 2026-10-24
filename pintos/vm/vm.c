@@ -1,7 +1,9 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
+#include "hash.h"
 #include "threads/malloc.h"
 #include "vm/vm.h"
+#include "threads/vaddr.h"
 #include "vm/inspect.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
@@ -37,6 +39,25 @@ static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
 
+static bool less(const struct hash_elem *elem1, const struct hash_elem *elem2,
+                 void *aux UNUSED)
+{
+    const struct page *page1 = hash_entry(elem1, struct page, spt_elem);
+    const struct page *page2 = hash_entry(elem2, struct page, spt_elem);
+
+    return page1->va < page2->va;
+}
+
+static uint64_t hashing(const struct hash_elem *elem, void *aux UNUSED)
+{
+    const struct page *p = hash_entry(elem, struct page, spt_elem);
+    uint64_t page_num = pg_no(p->va);
+    /* [CJG] Hashing pg_no(va), not va: because offsets of page refer to start-adress of page - are always 0.
+     * hash_bytes() uses the low bits, so 'raw va' puts consecutive pages in one bucket. */
+
+    return hash_bytes(&page_num, sizeof(p->va));
+}
+
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
  * `vm_alloc_page`. */
@@ -62,23 +83,24 @@ err:
 }
 
 /* Find VA from spt and return page. On error, return NULL. */
-struct page *spt_find_page(struct supplemental_page_table *spt UNUSED,
-                           void *va UNUSED)
+struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 {
-    struct page *page = NULL;
-    /* TODO: Fill this function. */
+    struct page tmp;
+    struct hash_elem *elem;
 
-    return page;
+    tmp.va = pg_round_down(va);
+    elem = hash_find(&spt->pages, &tmp.spt_elem);
+
+    /* [CJG] If the provided SPT has no page holding (va), or not. */
+    return (elem == NULL) ? NULL : hash_entry(elem, struct page, spt_elem);
 }
 
 /* Insert PAGE into spt with validation. */
-bool spt_insert_page(struct supplemental_page_table *spt UNUSED,
-                     struct page *page UNUSED)
+bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 {
-    int succ = false;
-    /* TODO: Fill this function. */
-
-    return succ;
+    bool result = hash_insert(&spt->pages, &page->spt_elem) == NULL;
+    /* [CJG] Check whether page(hash) insertion into the provided spt success or not*/
+    return result;
 }
 
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
@@ -175,8 +197,17 @@ static bool vm_do_claim_page(struct page *page)
 }
 
 /* Initialize new supplemental page table */
-void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED)
+bool supplemental_page_table_init(struct supplemental_page_table *spt)
 {
+    bool result = hash_init(&spt->pages, hashing, less, NULL);
+    /* [CJG] False case derived from malloc() at pages->buckets.*/
+
+    /* [CJG] Changed the original void type to `bool`, because of its false case. For example, __do_fork() needs this function's result(or any signal), in light of calling `goto error`. */
+
+    if (!result) {
+        return false;
+    }
+    return result;
 }
 
 /* Copy supplemental page table from src to dst */
