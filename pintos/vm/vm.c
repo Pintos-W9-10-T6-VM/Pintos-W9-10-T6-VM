@@ -4,7 +4,6 @@
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "threads/vaddr.h"
-#include "userprog/process.h"
 #include "vm/inspect.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
@@ -81,13 +80,17 @@ err:
 }
 
 /* Find VA from spt and return page. On error, return NULL. */
-struct page *spt_find_page(struct supplemental_page_table *spt UNUSED,
-                           void *va UNUSED)
+struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 {
     struct page *page = NULL;
-    /* TODO: Fill this function. */
+    struct page tmp;
+    struct hash_elem *elem;
 
-    return page;
+    tmp.va = pg_round_down(va);
+    elem = hash_find(&spt->pages, &tmp.spt_elem);
+
+    /* If the provided SPT has no page holding (va), or not. */
+    return (elem == NULL) ? NULL : hash_entry(elem, struct page, spt_elem);
 }
 
 /* Insert PAGE into spt with validation. */
@@ -200,6 +203,7 @@ bool supplemental_page_table_init(struct supplemental_page_table *spt)
     if (!result) {
         return false;
     }
+    return result;
 }
 
 /* Copy supplemental page table from src to dst */
