@@ -52,7 +52,7 @@ static uint64_t hashing(const struct hash_elem *elem, void *aux UNUSED)
 {
     const struct page *p = hash_entry(elem, struct page, spt_elem);
     uint64_t page_num = pg_no(p->va);
-    /* [CJG] Hashing pg_no(va), not va: because offsets direct start adress of page - are always 0.
+    /* [CJG] Hashing pg_no(va), not va: because offsets of page refer to start-adress of page - are always 0.
      * hash_bytes() uses the low bits, so 'raw va' puts consecutive pages in one bucket. */
 
     return hash_bytes(&page_num, sizeof(p->va));
