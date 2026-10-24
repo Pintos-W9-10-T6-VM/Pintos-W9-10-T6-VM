@@ -51,8 +51,8 @@ static bool less(const struct hash_elem *elem1, const struct hash_elem *elem2,
 static uint64_t hashing(const struct hash_elem *elem, void *aux UNUSED)
 {
     const struct page *p = hash_entry(elem, struct page, spt_elem);
-    return hash_int(pg_no(p->va));
-    /*     hash_bytes(&p->va, sizeof(p->va)); */
+    uint64_t page_num = pg_no(p->va);
+    return hash_bytes(&page_num, sizeof(p->va));
 }
 
 /* Create the pending page object with initializer. If you want to create a
