@@ -196,7 +196,7 @@ static void initd(void *f_name)
 #ifdef VM
     if (!supplemental_page_table_init(&curr->spt)) {
         process_terminate(-1);
-    };
+    }
 #endif
 
     process_init();
