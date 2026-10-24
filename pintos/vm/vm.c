@@ -88,7 +88,7 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
     tmp.va = pg_round_down(va);
     elem = hash_find(&spt->pages, &tmp.spt_elem);
 
-    /* If the provided SPT has no page holding (va), or not. */
+    /* [CJG] If the provided SPT has no page holding (va), or not. */
     return (elem == NULL) ? NULL : hash_entry(elem, struct page, spt_elem);
 }
 
@@ -96,7 +96,7 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 {
     bool result = hash_insert(&spt->pages, &page->spt_elem) == NULL;
-    /* Check whether page(hash) insertion into the provided spt success or not*/
+    /* [CJG] Check whether page(hash) insertion into the provided spt success or not*/
     return result;
 }
 
@@ -197,6 +197,10 @@ static bool vm_do_claim_page(struct page *page)
 bool supplemental_page_table_init(struct supplemental_page_table *spt)
 {
     bool result = hash_init(&spt->pages, hashing, less, NULL);
+    /* [CJG] False case derived from malloc() at pages->buckets.*/
+
+    /* [CJG] Changed the original void type to `bool`, because of its false case. For example, __do_fork() needs this function's result(or any signal), in light of calling `goto error`. */
+
     if (!result) {
         return false;
     }
