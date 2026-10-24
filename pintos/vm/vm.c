@@ -82,7 +82,6 @@ err:
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 {
-    struct page *page = NULL;
     struct page tmp;
     struct hash_elem *elem;
 
@@ -94,13 +93,11 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 }
 
 /* Insert PAGE into spt with validation. */
-bool spt_insert_page(struct supplemental_page_table *spt UNUSED,
-                     struct page *page UNUSED)
+bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 {
-    int succ = false;
-    /* TODO: Fill this function. */
-
-    return succ;
+    bool result = hash_insert(&spt->pages, &page->spt_elem) == NULL;
+    /* Check whether page(hash) insertion into the provided spt success or not*/
+    return result;
 }
 
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
