@@ -194,8 +194,12 @@ static bool vm_do_claim_page(struct page *page)
 }
 
 /* Initialize new supplemental page table */
-void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED)
+bool supplemental_page_table_init(struct supplemental_page_table *spt)
 {
+    bool result = hash_init(&spt->pages, hashing, less, NULL);
+    if (!result) {
+        return false;
+    }
 }
 
 /* Copy supplemental page table from src to dst */
