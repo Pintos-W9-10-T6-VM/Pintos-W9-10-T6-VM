@@ -1,7 +1,10 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
+#include "hash.h"
 #include "threads/malloc.h"
 #include "vm/vm.h"
+#include "threads/vaddr.h"
+#include "userprog/process.h"
 #include "vm/inspect.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
@@ -36,6 +39,22 @@ enum vm_type page_get_type(struct page *page)
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
+
+static bool less(const struct hash_elem *elem1, const struct hash_elem *elem2,
+                 void *aux UNUSED)
+{
+    const struct page *page1 = hash_entry(elem1, struct page, spt_elem);
+    const struct page *page2 = hash_entry(elem2, struct page, spt_elem);
+
+    return page1->va < page2->va;
+}
+
+static uint64_t hashing(const struct hash_elem *elem, void *aux UNUSED)
+{
+    const struct page *p = hash_entry(elem, struct page, spt_elem);
+    return hash_int(pg_no(p->va));
+    /*     hash_bytes(&p->va, sizeof(p->va)); */
+}
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
