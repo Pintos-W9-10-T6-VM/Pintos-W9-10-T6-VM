@@ -64,7 +64,7 @@ struct
         completed; /* 복제 준비 완료 알림이다. status->exited와 역할이 다르다. */
     bool success;  /* 주소 공간 등 현재 단계의 복제가 성공했는지 기록한다. */
 }; /* 이 객체의 수명은 부모가 completed를 받고 결과를 읽을 때까지다. */
-/* 선언 연결: 기존 static void __do_fork (void *);, child_status_create(), child_status_put()의 전방 선언이 
+/* 선언 연결: 기존 static void __do_fork (void *);, child_status_create(), child_status_put()의 전방 선언이
 이미 있으므로 그대로 사용한다. fork_start_info는 process.c 안에서만 사용하므로 헤더에 노출하지 않는다. */
 
 static void process_cleanup(void);
@@ -197,7 +197,9 @@ static void initd(void *f_name)
     /* 내용은 인수했으므로 전달용 포장 구조체만 해제한다. */
     free(start);
 #ifdef VM
-    supplemental_page_table_init(&curr->spt);
+    if (!supplemental_page_table_init(&curr->spt)) {
+        process_terminate(-1);
+    }
 #endif
 
     process_init();
@@ -274,7 +276,7 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED)
 
 #ifndef VM
 /* Duplicate the parent's address space by passing this function to the
- * pml4_for_each. This is only for the project 2. 
+ * pml4_for_each. This is only for the project 2.
  *  Project 2의 즉시 페이지 복제 방식에서 사용한다. */
 /* [YYJ] 부모 사용자 페이지 하나를 자식의 별도 물리 페이지에 복사한다. */
 static bool duplicate_pte(uint64_t *pte, void *va, void *aux)
@@ -372,7 +374,9 @@ static void __do_fork(void *aux)
         current); /* 자식의 주소 공간과 커널 진입 스택 정보를 활성화한다. */
 
 #ifdef VM
-    supplemental_page_table_init(&current->spt);
+    if (!supplemental_page_table_init(&current->spt)) {
+        goto error;
+    }
     if (!supplemental_page_table_copy(&current->spt, &parent->spt)) {
         goto error;
     }
@@ -427,8 +431,8 @@ error: /* 모든 복제 실패가 모이는 공통 경로다. */
     process_terminate(
         -1); /* 이후 start를 읽지 않고 기존 종료 경로로 정리한다. */
 } /* __do_fork 정의를 끝낸다. */
-/* process_init()는 현재 실질적인 초기화가 없는 기존 함수다. FD 목록은 아래 
-thread.c 초기화 코드에서 스레드 생성 시 준비하고 부모 FD는 완료 알림 전에 
+/* process_init()는 현재 실질적인 초기화가 없는 기존 함수다. FD 목록은 아래
+thread.c 초기화 코드에서 스레드 생성 시 준비하고 부모 FD는 완료 알림 전에
 복제한다. 성공 알림 이후에 복제하면 부모가 FD를 닫거나 변경할 수 있어 잘못된다. */
 
 /* Switch the current execution context to the f_name.
@@ -571,10 +575,6 @@ int process_wait(tid_t child_tid UNUSED)
 void process_exit(void)
 {
     struct thread *curr = thread_current();
-    /* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
     /* 사용자 프로세스의 종료 메시지만 출력한다. */
     if (curr->is_user_process) {
         printf("%s: exit(%d)\n", curr->name, curr->exit_status);
@@ -1151,7 +1151,7 @@ done:
     file_close(file);
     return success;
 }
-/* 로딩 실패는 지역 file을 닫고, 성공은 running_file로 유지한다. 이후 스택 인자 구성 실패도 
+/* 로딩 실패는 지역 file을 닫고, 성공은 running_file로 유지한다. 이후 스택 인자 구성 실패도
 process_terminate→process_exit→process_cleanup이 실행 파일을 닫는다. fork는 file_duplicate가 기존 deny_write 상태를 복제한다. */
 
 /*

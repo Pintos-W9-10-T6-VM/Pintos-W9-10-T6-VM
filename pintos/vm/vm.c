@@ -9,6 +9,16 @@
 #include "threads/thread.h"
 #include "vm/anon.h"
 #include "vm/file.h"
+#include "debug.h"
+#include "hash.h"
+#include "threads/malloc.h"
+#include "vm/vm.h"
+#include "threads/mmu.h"
+#include "threads/palloc.h"
+#include "threads/pte.h"
+#include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "userprog/process.h"
 #include "vm/inspect.h"
 #include "vm/uninit.h"
 
@@ -53,6 +63,25 @@ enum vm_type page_get_type(struct page *page)
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
+
+static bool less(const struct hash_elem *elem1, const struct hash_elem *elem2,
+                 void *aux UNUSED)
+{
+    const struct page *page1 = hash_entry(elem1, struct page, spt_elem);
+    const struct page *page2 = hash_entry(elem2, struct page, spt_elem);
+
+    return page1->va < page2->va;
+}
+
+static uint64_t hashing(const struct hash_elem *elem, void *aux UNUSED)
+{
+    const struct page *p = hash_entry(elem, struct page, spt_elem);
+    uint64_t page_num = pg_no(p->va);
+    /* [CJG] Hashing pg_no(va), not va: because offsets of page refer to start-adress of page - are always 0.
+     * hash_bytes() uses the low bits, so 'raw va' puts consecutive pages in one bucket. */
+
+    return hash_bytes(&page_num, sizeof(p->va));
+}
 
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
@@ -120,39 +149,30 @@ err:
 
 /* Find VA from spt and return page. On error, return NULL. */
 /* [한국어 번역] spt에서 VA에 해당하는 페이지를 찾아 반환한다. 오류가 발생하면 NULL을 반환한다. */
-struct page *spt_find_page(struct supplemental_page_table *spt UNUSED,
-                           void *va UNUSED)
+struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
 {
-    struct page *page = NULL;
-    /* TODO: Fill this function. Find struct page that corresponds to va from the given supplemental page table. If fail, return NULL.*/
-    /* [한국어 번역]
-     * TODO: 이 함수를 구현한다. 주어진 보조 페이지 테이블에서 va에 해당하는
-     * struct page를 찾는다. 찾지 못하면 NULL을 반환한다.
-     */
+    struct page tmp;
+    struct hash_elem *elem;
 
-    return page;
+    tmp.va = pg_round_down(va);
+    elem = hash_find(&spt->pages, &tmp.spt_elem);
+
+    /* [CJG] If the provided SPT has page holding (va), or not. */
+    return (elem == NULL) ? NULL : hash_entry(elem, struct page, spt_elem);
 }
 
 /* Insert PAGE into spt with validation. */
 /* [한국어 번역] 유효성을 검사하여 PAGE를 spt에 삽입한다. */
-bool spt_insert_page(struct supplemental_page_table *spt UNUSED,
-                     struct page *page UNUSED)
+bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 {
-    int succ = false;
-    /* TODO: Fill this function. Insert struct page into the given supplemental page table. 
-    This function should checks that the virtual address does not exist in the given supplemental page table.*/
-    /* [한국어 번역]
-     * TODO: 이 함수를 구현한다. 주어진 보조 페이지 테이블에 struct page를 삽입한다.
-     * 해당 가상 주소가 테이블에 이미 존재하지 않는지 확인해야 한다.
-     */
-
-    return succ;
+    bool result = hash_insert(&spt->pages, &page->spt_elem) == NULL;
+    /* [CJG] Check whether page(hash) insertion into the provided spt success or not*/
+    return result;
 }
 
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 {
     vm_dealloc_page(page);
-    return true;
 }
 
 /* Get the struct frame, that will be evicted. */
@@ -192,12 +212,21 @@ static struct frame *vm_evict_frame(void)
  */
 static struct frame *vm_get_frame(void)
 {
-    struct frame *frame = NULL;
-    /* TODO: Fill this function. */
-    /* [한국어 번역] TODO: 이 함수를 구현한다. */
+    struct frame *frame = malloc(sizeof *frame);
+    if (frame == NULL) {
+        PANIC("Memory allocation failed.");
+    } /*  [CJG] Malloc() failed. */
 
-    ASSERT(frame != NULL);
-    ASSERT(frame->page == NULL);
+    frame->kva = palloc_get_page(PAL_USER);
+    frame->page = NULL;
+
+    if (frame->kva == NULL) {
+        PANIC("todo");
+    }
+
+    /* [CJG] Swap out() would be placed in this area, soon. */
+    /* [CJG] Swap out() 함수관련 내용이 PANIC("todo")부분 대신 들어갈 거라고 gitbook이 말해줍니다. */
+
     return frame;
 }
 
@@ -221,6 +250,11 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 {
     struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
     struct page *page = NULL;
+
+    // if (!is_writable(thread_current()->pml4)) {
+    //     thread_current()->exit_status = -1;
+    //     process_exit();
+    // }
     /* TODO: Validate the fault */
     /* [한국어 번역] TODO: 폴트의 유효성을 검사한다. */
     /* TODO: Your code goes here */
@@ -243,11 +277,15 @@ void vm_dealloc_page(struct page *page)
 
 /* Claim the page that allocate on VA. */
 /* [한국어 번역] VA에 할당된 페이지의 실제 메모리를 확보한다. */
-bool vm_claim_page(void *va UNUSED)
+bool vm_claim_page(void *va)
 {
-    struct page *page = NULL;
-    /* TODO: Fill this function */
-    /* [한국어 번역] TODO: 이 함수를 구현한다. */
+    struct page *page = spt_find_page(&thread_current()->spt, va);
+    if (page == NULL) {
+        return false;
+    }
+
+    /* [CJG]  Find the appropirate page for user's va. */
+    /* [CJG] 유저의 va를 넣을 페이지 할당 요청. */
 
     return vm_do_claim_page(page);
 }
@@ -258,34 +296,38 @@ static bool vm_do_claim_page(struct page *page)
 {
     struct frame *frame = vm_get_frame();
 
-    /* Set links */
-    /* [한국어 번역] 서로를 가리키는 연결을 설정한다. */
+    /* Set links for each other. */
     frame->page = page;
     page->frame = frame;
 
-    /* TODO: Insert page table entry to map page's VA to frame's PA. */
-    /* [한국어 번역]
-     * TODO: 페이지의 가상 주소(VA)를 프레임의 물리 주소(PA)에 매핑하는
-     * 페이지 테이블 항목을 삽입한다.
-     */
+    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva, PTE_W)) {
+        page->frame = NULL;
+        palloc_free_page(frame->kva);
+        free(frame);
+
+        frame->page = NULL;
+        return false;
+    }
+
+    /* [CJG] 'PTE_W' refers to flags. It means write-flag-bit is turned on. Must be considered all pages now have a write authority. */
+    /* [CJG] PTE_W라고 쓴 이유는 page->va의 권한 플래그(특히 쓰기 권한)을 활성화하기 위함입니다. 다만, 지금은 '모든 페이지가 쓰기 가능한 상태'입니다.*/
 
     return swap_in(page, frame->kva);
 }
 
 /* Initialize new supplemental page table */
 /* [한국어 번역] 새 보조 페이지 테이블을 초기화한다. */
-void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED)
+bool supplemental_page_table_init(struct supplemental_page_table *spt)
 {
-    /*
-    Initializes the supplemental page table. You may choose the data structure to use for the supplemental page table. 
-    The function is called when a new process starts (in initd of userprog/process.c) and when a process is being forked 
-    (in __do_fork of userprog/process.c).
-    */
-    /* [한국어 번역]
-     * 보조 페이지 테이블을 초기화한다. 사용할 자료구조는 자유롭게 선택할 수 있다.
-     * 새 프로세스가 시작될 때(userprog/process.c의 initd)와
-     * 프로세스를 fork할 때(userprog/process.c의 __do_fork) 호출된다.
-     */
+    bool result = hash_init(&spt->pages, hashing, less, NULL);
+    /* [CJG] False case derived from malloc() at pages->buckets.*/
+
+    /* [CJG] Changed the original void type to `bool`, because of its false case. For example, __do_fork() needs this function's result(or any signal), in light of calling `goto error`. */
+
+    if (!result) {
+        return false;
+    }
+    return result;
 }
 
 /* Copy supplemental page table from src to dst */
