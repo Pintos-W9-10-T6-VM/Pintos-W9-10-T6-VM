@@ -1,9 +1,15 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
+#include "debug.h"
 #include "hash.h"
 #include "threads/malloc.h"
 #include "vm/vm.h"
+#include "threads/mmu.h"
+#include "threads/palloc.h"
+#include "threads/pte.h"
+#include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/process.h"
 #include "vm/inspect.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
@@ -91,7 +97,7 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
     tmp.va = pg_round_down(va);
     elem = hash_find(&spt->pages, &tmp.spt_elem);
 
-    /* [CJG] If the provided SPT has no page holding (va), or not. */
+    /* [CJG] If the provided SPT has page holding (va), or not. */
     return (elem == NULL) ? NULL : hash_entry(elem, struct page, spt_elem);
 }
 
@@ -106,7 +112,6 @@ bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 {
     vm_dealloc_page(page);
-    return true;
 }
 
 /* Get the struct frame, that will be evicted. */
@@ -134,11 +139,21 @@ static struct frame *vm_evict_frame(void)
  * space.*/
 static struct frame *vm_get_frame(void)
 {
-    struct frame *frame = NULL;
-    /* TODO: Fill this function. */
+    struct frame *frame = malloc(sizeof *frame);
+    if (frame == NULL) {
+        PANIC("Memory allocation failed.");
+    } /*  [CJG] Malloc() failed. */
 
-    ASSERT(frame != NULL);
-    ASSERT(frame->page == NULL);
+    frame->kva = palloc_get_page(PAL_USER);
+    frame->page = NULL;
+
+    if (frame->kva == NULL) {
+        PANIC("todo");
+    }
+
+    /* [CJG] Swap out() would be placed in this area, soon. */
+    /* [CJG] Swap out() 함수관련 내용이 PANIC("todo")부분 대신 들어갈 거라고 gitbook이 말해줍니다. */
+
     return frame;
 }
 
@@ -159,6 +174,11 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 {
     struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
     struct page *page = NULL;
+
+    // if (!is_writable(thread_current()->pml4)) {
+    //     thread_current()->exit_status = -1;
+    //     process_exit();
+    // }
     /* TODO: Validate the fault */
     /* TODO: Your code goes here */
 
@@ -187,11 +207,16 @@ static bool vm_do_claim_page(struct page *page)
 {
     struct frame *frame = vm_get_frame();
 
-    /* Set links */
+    /* Set links for each other. */
     frame->page = page;
     page->frame = frame;
 
-    /* TODO: Insert page table entry to map page's VA to frame's PA. */
+    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva, true)) {
+        return false;
+    }
+
+    /* [CJG] 'true' referts to flags. It means all bit flag(PTE P/W/U) are turned on. */
+    /* [CJG] true라고 쓴 이유는 물리 메모리 내 권한 플래그(특히 쓰기 권한)을 활성화하기 위함입니다. */
 
     return swap_in(page, frame->kva);
 }

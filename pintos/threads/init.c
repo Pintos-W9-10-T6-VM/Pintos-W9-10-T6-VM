@@ -356,8 +356,8 @@ void power_off(void)
 
     printf("Powering off...\n");
     outw(0x604, 0x2000); /* Poweroff command for qemu */
-    for (;;)
-        ;
+    for (;;) {
+    }
 }
 
 /* Print statistics about Pintos execution. */
