@@ -134,6 +134,10 @@ class Pintos(object):
         cmd.extend(['-no-reboot'])
         # cmd.extend(['-enable-kvm']) # Sadly, kvm is not available on server.
         cmd.extend(['-serial', 'mon:stdio'])
+        # Optional extra QEMU flags, e.g. PINTOS_QEMU_EXTRA="-icount shift=5,sleep=off".
+        # Unset = original behaviour.
+        if os.environ.get('PINTOS_QEMU_EXTRA'):
+            cmd.extend(os.environ['PINTOS_QEMU_EXTRA'].split())
         return cmd
 
     def get_files(self, gets):
