@@ -244,21 +244,23 @@ static bool vm_handle_wp(struct page *page UNUSED)
 
 /* Return true on success */
 /* [한국어 번역] 성공하면 true를 반환한다. */
-bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
-                         bool user UNUSED, bool write UNUSED,
-                         bool not_present UNUSED)
+bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr,
+                         bool user UNUSED, bool write UNUSED, bool not_present)
 {
-    struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-    struct page *page = NULL;
+    if (!not_present) {
+        return false;
+    } /* [CJG] P비트(메모리 매핑)가 있는데도 fault가 난 경우 = PTE_U | PTE_W 위반. */
 
-    // if (!is_writable(thread_current()->pml4)) {
-    //     thread_current()->exit_status = -1;
-    //     process_exit();
-    // }
-    /* TODO: Validate the fault */
-    /* [한국어 번역] TODO: 폴트의 유효성을 검사한다. */
-    /* TODO: Your code goes here */
-    /* [한국어 번역] TODO: 여기에 코드를 작성한다. */
+    /* [CJG](userprog) not_present = (f->error_code & PF_P) == 0; */
+
+    struct supplemental_page_table *spt = &thread_current()->spt;
+    struct page *page = spt_find_page(spt, addr);
+
+    if (page == NULL) {
+        return false;
+    } /* [CJG] *NULL 같은 케이스(잘못된 주소). */
+
+    /* [CJG] For now, just consider the first case, lazy-loaded page. */
 
     return vm_do_claim_page(page);
 }
@@ -300,17 +302,16 @@ static bool vm_do_claim_page(struct page *page)
     frame->page = page;
     page->frame = frame;
 
-    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva, PTE_W)) {
+    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva,
+                       page->writable)) {
         page->frame = NULL;
         palloc_free_page(frame->kva);
         free(frame);
 
-        frame->page = NULL;
         return false;
     }
 
-    /* [CJG] 'PTE_W' refers to flags. It means write-flag-bit is turned on. Must be considered all pages now have a write authority. */
-    /* [CJG] PTE_W라고 쓴 이유는 page->va의 권한 플래그(특히 쓰기 권한)을 활성화하기 위함입니다. 다만, 지금은 '모든 페이지가 쓰기 가능한 상태'입니다.*/
+    /* [CJG] page->va에 쓰기 권한이 있는 지 확인하고, pml4기반으로 frame->kva의 값을 넣습니다. */
 
     return swap_in(page, frame->kva);
 }
