@@ -120,14 +120,14 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
     elem = hash_find(&spt->pages, &tmp.spt_elem);
 
     /* [CJG] If the provided SPT has page holding (va), or not. */
-    return (elem == NULL) ? NULL : hash_entry(elem, struct page, spt_elem);
+    return (elem != NULL) ? hash_entry(elem, struct page, spt_elem) : NULL;
 }
 
 /* Insert PAGE into spt with validation. */
 /* [한국어 번역] 유효성을 검사하여 PAGE를 spt에 삽입한다. */
 bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 {
-    bool result = hash_insert(&spt->pages, &page->spt_elem) == NULL;
+    bool result = (hash_insert(&spt->pages, &page->spt_elem) == NULL);
     /* [CJG] Check whether page(hash) insertion into the provided spt success or not*/
     return result;
 }
