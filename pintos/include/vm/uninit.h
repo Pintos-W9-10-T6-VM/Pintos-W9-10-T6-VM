@@ -9,12 +9,15 @@ typedef bool vm_initializer(struct page *, void *aux);
 
 /* Uninitlialized page. The type for implementing the
  * "Lazy loading". */
+/* [한국어 번역] 초기화되지 않은 페이지. "지연 적재"를 구현하기 위한 타입이다. */
 struct uninit_page {
     /* Initiate the contets of the page */
+    /* [한국어 번역] 페이지의 내용을 초기화한다. */
     vm_initializer *init;
     enum vm_type type;
     void *aux;
     /* Initiate the struct page and maps the pa to the va */
+    /* [한국어 번역] struct page를 초기화하고 물리 주소(pa)를 가상 주소(va)에 매핑한다. */
     bool (*page_initializer)(struct page *, enum vm_type, void *kva);
 };
 
