@@ -66,6 +66,9 @@ struct page {
     /* Your implementation */
     /* [한국어 번역] 직접 구현할 부분. */
 
+    /* [SHW] 페이지 폴트 전, 쓰기 권한을 저장*/
+    bool writable;
+
     /* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
     /* [한국어 번역]

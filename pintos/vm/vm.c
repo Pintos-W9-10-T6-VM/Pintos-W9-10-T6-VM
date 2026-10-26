@@ -1,9 +1,15 @@
 /* vm.c: Generic interface for virtual memory objects. */
 /* [한국어 번역] vm.c: 가상 메모리 객체를 위한 공통 인터페이스. */
 
+#include "stdbool.h"
+#include "stddef.h"
 #include "threads/malloc.h"
 #include "vm/vm.h"
+#include "threads/palloc.h"
+#include "threads/thread.h"
+#include "vm/anon.h"
 #include "vm/inspect.h"
+#include "vm/uninit.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -75,8 +81,20 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
          * TODO: 필드 수정은 uninit_new를 호출한 뒤에 해야 한다.
          */
 
+        struct page *page = malloc(sizeof(struct page));
+        if (page == NULL) {
+            goto err;
+        }
+        uninit_new(page, upage, init, type, aux, anon_initializer);
+        page->writable = writable;
+
         /* TODO: Insert the page into the spt. */
         /* [한국어 번역] TODO: 페이지를 spt에 삽입한다. */
+        if (!spt_insert_page(&thread_current()->spt, page)) {
+            free(page);
+            goto err;
+        }
+        return true;
     }
 err:
     return false;

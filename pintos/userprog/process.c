@@ -2,9 +2,11 @@
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "filesys/off_t.h"
 #include "userprog/gdt.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
@@ -1433,6 +1435,14 @@ static bool install_page(void *upage, void *kpage, bool writable)
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
+/* [SHW] 코드 로드시 lazy_load_segment에 넘겨줄 파일 정보*/
+struct load_info {
+    struct file *file;
+    off_t ofs;
+    uint32_t read_bytes;
+    uint32_t zero_bytes;
+};
+
 static bool lazy_load_segment(struct page *page, void *aux)
 {
     /* TODO: Load the segment from the file */
@@ -1470,9 +1480,21 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
         size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
         /* TODO: Set up aux to pass information to the lazy_load_segment. */
-        void *aux = NULL;
+
+        /* [SHW] lazy_load_segment에 인자로 넘겨줄 파일 정보*/
+        struct load_info *load_info = malloc(sizeof(struct load_info));
+        if (load_info == NULL) {
+            return false;
+        }
+        load_info->file = file;
+        load_info->ofs = ofs;
+        load_info->read_bytes = page_read_bytes;
+        load_info->zero_bytes = page_zero_bytes;
+
+        void *aux = load_info;
         if (!vm_alloc_page_with_initializer(VM_ANON, upage, writable,
                                             lazy_load_segment, aux)) {
+            free(load_info);
             return false;
         }
 
@@ -1480,6 +1502,7 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         upage += PGSIZE;
+        ofs += page_read_bytes;
     }
     return true;
 }
