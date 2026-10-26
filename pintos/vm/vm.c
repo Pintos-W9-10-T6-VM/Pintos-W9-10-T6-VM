@@ -194,10 +194,15 @@ void vm_dealloc_page(struct page *page)
 }
 
 /* Claim the page that allocate on VA. */
-bool vm_claim_page(void *va UNUSED)
+bool vm_claim_page(void *va)
 {
-    struct page *page = NULL;
-    /* TODO: Fill this function */
+    struct page *page = spt_find_page(&thread_current()->spt, va);
+    if (page == NULL) {
+        return false;
+    }
+
+    /* [CJG]  Find the appropirate page for user's va. */
+    /* [CJG] 유저의 va를 넣을 페이지 할당 요청. */
 
     return vm_do_claim_page(page);
 }
@@ -211,12 +216,17 @@ static bool vm_do_claim_page(struct page *page)
     frame->page = page;
     page->frame = frame;
 
-    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva, true)) {
+    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva, PTE_W)) {
+        palloc_free_page(frame->kva);
+        free(frame);
+        page->frame = NULL;
+
+        frame->page = NULL;
         return false;
     }
 
-    /* [CJG] 'true' referts to flags. It means all bit flag(PTE P/W/U) are turned on. */
-    /* [CJG] true라고 쓴 이유는 물리 메모리 내 권한 플래그(특히 쓰기 권한)을 활성화하기 위함입니다. */
+    /* [CJG] 'PTE_W' refers to flags. It means write-flag-bit is turned on. Must be considered all pages now have a write authority. */
+    /* [CJG] PTE_W라고 쓴 이유는 page->va의 권한 플래그(특히 쓰기 권한)을 활성화하기 위함입니다. 다만, 지금은 '모든 페이지가 쓰기 가능한 상태'입니다.*/
 
     return swap_in(page, frame->kva);
 }
