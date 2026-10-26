@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "filesys/off_t.h"
+#include "stdbool.h"
 #include "userprog/gdt.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
@@ -1448,6 +1449,21 @@ static bool lazy_load_segment(struct page *page, void *aux)
     /* TODO: Load the segment from the file */
     /* TODO: This called when the first page fault occurs on address VA. */
     /* TODO: VA is available when calling this function. */
+
+    bool success;
+    struct load_info *load_info = (struct load_info *)aux;
+    lock_acquire(&filesys_lock);
+    file_seek(load_info->file, load_info->ofs);
+    if ((success = (file_read(load_info->file, page->frame->kva,
+                              load_info->read_bytes) ==
+                    (int)load_info->read_bytes))) {
+        memset(page->frame->kva + load_info->read_bytes, 0,
+               load_info->zero_bytes);
+    }
+    lock_release(&filesys_lock);
+
+    free(load_info);
+    return success;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
