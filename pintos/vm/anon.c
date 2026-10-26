@@ -1,6 +1,7 @@
 /* anon.c: Implementation of page for non-disk image (a.k.a. anonymous page). */
 /* [한국어 번역] anon.c: 디스크 이미지와 관련 없는 페이지(익명 페이지)의 구현. */
 
+#include "stdbool.h"
 #include "vm/vm.h"
 #include "devices/disk.h"
 
@@ -35,9 +36,17 @@ bool anon_initializer(struct page *page, enum vm_type type, void *kva)
 {
     /* Set up the handler */
     /* [한국어 번역] 핸들러를 설정한다. */
+
+    /* [SHW] anon타입이 아니면 실패*/
+    if (VM_TYPE(type) != VM_ANON) {
+        return false;
+    }
+
     page->operations = &anon_ops;
 
     struct anon_page *anon_page = &page->anon;
+
+    return true;
 }
 
 /* Swap in the page by read contents from the swap disk. */
@@ -60,4 +69,3 @@ static void anon_destroy(struct page *page)
 {
     struct anon_page *anon_page = &page->anon;
 }
-                                                                                                                                                                                                                 

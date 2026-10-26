@@ -8,6 +8,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "vm/anon.h"
+#include "vm/file.h"
 #include "vm/inspect.h"
 #include "vm/uninit.h"
 
@@ -85,7 +86,24 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
         if (page == NULL) {
             goto err;
         }
-        uninit_new(page, upage, init, type, aux, anon_initializer);
+
+        /* [SHW] 현재 initializer를 페이지 타입에 따라 initializer를 바꿔줘야한다. */
+        bool (*page_initializer)(struct page *page, enum vm_type type,
+                                 void *kva);
+        switch (VM_TYPE(type)) {
+        case VM_ANON:
+            page_initializer = anon_initializer;
+            break;
+
+        case VM_FILE:
+            page_initializer = file_backed_initializer;
+            break;
+
+        default:
+            free(page);
+            goto err;
+        }
+        uninit_new(page, upage, init, type, aux, page_initializer);
         page->writable = writable;
 
         /* TODO: Insert the page into the spt. */
