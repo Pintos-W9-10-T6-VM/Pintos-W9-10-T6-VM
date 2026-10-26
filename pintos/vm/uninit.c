@@ -19,6 +19,9 @@
 #include "vm/vm.h"
 #include "vm/uninit.h"
 
+/* [SHW] free 사용을 위해서 malloc.h include*/
+#include "threads/malloc.h"
+
 static bool uninit_initialize(struct page *page, void *kva);
 static void uninit_destroy(struct page *page);
 
@@ -79,11 +82,14 @@ static bool uninit_initialize(struct page *page, void *kva)
  */
 static void uninit_destroy(struct page *page)
 {
-    struct uninit_page *uninit UNUSED = &page->uninit;
+    struct uninit_page *uninit = &page->uninit;
     /* TODO: Fill this function.
 	 * TODO: If you don't have anything to do, just return. */
     /* [한국어 번역]
      * TODO: 이 함수를 구현한다.
      * TODO: 처리할 작업이 없다면 바로 반환한다.
      */
+
+    /* [SHW] 페이지 폴트가 일어나지 않고 destroy된다면 aux에 받았던 load_info가 해제되지 않아서 해제해준다.*/
+    free(uninit->aux);
 }

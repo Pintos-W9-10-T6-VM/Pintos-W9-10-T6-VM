@@ -65,6 +65,11 @@ struct page {
     /* [한국어 번역] 프레임을 가리키는 역참조. */
 
     /* Your implementation */
+    /* [한국어 번역] 직접 구현할 부분. */
+
+    /* [SHW] 페이지 폴트 전, 쓰기 권한을 저장*/
+    bool writable;
+
     struct hash_elem spt_elem; /* Element in SPT. */
     /* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
