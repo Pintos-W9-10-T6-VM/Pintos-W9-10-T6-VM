@@ -300,7 +300,8 @@ static bool vm_do_claim_page(struct page *page)
     frame->page = page;
     page->frame = frame;
 
-    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva, PTE_W)) {
+    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva,
+                       page->writable)) {
         page->frame = NULL;
         palloc_free_page(frame->kva);
         free(frame);
@@ -311,6 +312,7 @@ static bool vm_do_claim_page(struct page *page)
 
     /* [CJG] 'PTE_W' refers to flags. It means write-flag-bit is turned on. Must be considered all pages now have a write authority. */
     /* [CJG] PTE_W라고 쓴 이유는 page->va의 권한 플래그(특히 쓰기 권한)을 활성화하기 위함입니다. 다만, 지금은 '모든 페이지가 쓰기 가능한 상태'입니다.*/
+    /* [SHW] PTE_W -> page->writable로 수정, page별 쓰기 권한을 저장*/
 
     return swap_in(page, frame->kva);
 }
