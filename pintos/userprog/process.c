@@ -1534,6 +1534,14 @@ static bool setup_stack(struct intr_frame *if_)
 	 * TODO: You should mark the page is stack. */
     /* TODO: Your code goes here */
 
+    /* [SHW] stack_bottom에 사용자 스택 페이지를 VM_ANON으로 등록, 프레임 즉시 할당 
+     * (사용자 코드 실행 전에 setup_arguments가 인자를 써야 하므로) */
+    if (vm_alloc_page(VM_ANON, stack_bottom, true) &&
+        vm_claim_page(stack_bottom)) {
+        success = true;
+        if_->rsp = USER_STACK; /* [SHW] %rsp위치 설정 */
+    }
+
     return success;
 }
 #endif /* VM */
