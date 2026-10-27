@@ -83,6 +83,14 @@ static uint64_t hashing(const struct hash_elem *elem, void *aux UNUSED)
     return hash_bytes(&page_num, sizeof(p->va));
 }
 
+static void destructor(struct hash_elem *elem, void *aux UNUSED)
+{
+    struct page *page = hash_entry(elem, struct page, spt_elem);
+    free(page->frame);
+    destroy(page); // [CJG] destroy according to page type.
+    free(page);
+}
+
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
  * `vm_alloc_page`. */
@@ -340,12 +348,15 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 
 /* Free the resource hold by the supplemental page table */
 /* [한국어 번역] 보조 페이지 테이블이 보유한 자원을 해제한다. */
-void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED)
+void supplemental_page_table_kill(struct supplemental_page_table *spt)
 {
-    /* TODO: Destroy all the supplemental_page_table hold by thread and
-	 * TODO: writeback all the modified contents to the storage. */
-    /* [한국어 번역]
-     * TODO: 스레드가 보유한 보조 페이지 테이블 전체를 파괴하고,
-     * TODO: 수정된 모든 내용을 저장 장치에 다시 기록한다.
-     */
+    /* [CJG] _init() 실패(buckets == NULL) 뒤 종료 경로(_terminate(-1))에서 다시 불림. */
+    if (spt->pages.buckets == NULL) {
+        return;
+    }
+
+    hash_destroy(&spt->pages, destructor);
+    /* [CJG] spt는 thread 안의 값이라 계속 그 안에 남아있음. 다음 _kill()이 해시(pages.buckets) 없음으로 읽도록 비우기. */
+    spt->pages.buckets = NULL;
 }
+/* spt_kill()을 한 이후에 또 한 번 더 spt_kill()을 하게 되는 경우가 있나? 아니면. buckets가 NULL이어야, hash*/
