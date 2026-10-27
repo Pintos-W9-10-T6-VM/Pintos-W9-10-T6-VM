@@ -1425,14 +1425,6 @@ static bool install_page(void *upage, void *kpage, bool writable)
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
-/* [SHW] 코드 로드시 lazy_load_segment에 넘겨줄 파일 정보*/
-struct load_info {
-    struct file *file;
-    off_t ofs;
-    uint32_t read_bytes;
-    uint32_t zero_bytes;
-};
-
 static bool lazy_load_segment(struct page *page, void *aux)
 {
     /* TODO: Load the segment from the file */

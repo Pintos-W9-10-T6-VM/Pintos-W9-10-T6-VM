@@ -1,6 +1,8 @@
 /* vm.c: Generic interface for virtual memory objects. */
 /* [한국어 번역] vm.c: 가상 메모리 객체를 위한 공통 인터페이스. */
 
+#include <string.h>
+
 #include "stdbool.h"
 #include "stddef.h"
 #include "threads/malloc.h"
@@ -339,15 +341,72 @@ bool supplemental_page_table_init(struct supplemental_page_table *spt)
     return result;
 }
 
-/* Copy supplemental page table from src to dst */
-/* [한국어 번역] 보조 페이지 테이블을 src에서 dst로 복사한다. */
-bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
-                                  struct supplemental_page_table *src UNUSED)
+static bool uninit_page_copy(struct page *src_page)
 {
+    struct uninit_page *uninit = &src_page->uninit;
+
+    struct load_info *aux = malloc(sizeof *aux);
+    if (aux == NULL) {
+        return false;
+    }
+    memcpy(aux, uninit->aux, sizeof *aux);
+
+    if (!vm_alloc_page_with_initializer(uninit->type, src_page->va,
+                                        src_page->writable, uninit->init,
+                                        aux)) {
+        free(aux);
+        return false;
+    }
+    return vm_claim_page(src_page->va);
 }
 
-/* Free the resource hold by the supplemental page table */
-/* [한국어 번역] 보조 페이지 테이블이 보유한 자원을 해제한다. */
+static bool anon_page_copy(struct page *src_page)
+{
+    if (!vm_alloc_page(VM_ANON, src_page->va, src_page->writable)) {
+        return false;
+    }
+    if (!vm_claim_page(src_page->va)) {
+        return false;
+    }
+
+    struct page *dst_page = spt_find_page(&thread_current()->spt, src_page->va);
+    memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+    return true;
+}
+
+/* Copy supplemental page table from src to dst */
+/* [한국어 번역] 보조 페이지 테이블을 src에서 dst로 복사한다. */
+bool supplemental_page_table_copy(struct supplemental_page_table *dst,
+                                  struct supplemental_page_table *src)
+{
+    struct hash_iterator i;
+    bool copied;
+
+    hash_first(&i, &src->pages);
+    /* [CJG]  src->pages->bucket의 list_head = i->elem. */
+    while (hash_next(&i)) {
+        struct page *src_page = hash_entry(hash_cur(&i), struct page, spt_elem);
+        enum vm_type type = VM_TYPE(src_page->operations->type);
+
+        switch (type) {
+        case VM_UNINIT:
+            copied = uninit_page_copy(src_page);
+            break;
+        case VM_ANON:
+            copied = anon_page_copy(src_page);
+            break;
+        default:
+            copied = false;
+            break;
+        }
+
+        if (!copied) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void supplemental_page_table_kill(struct supplemental_page_table *spt)
 {
     /* [CJG] _init() 실패(buckets == NULL) 뒤 종료 경로(_terminate(-1))에서 다시 불림. */
@@ -359,4 +418,3 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt)
     /* [CJG] spt는 thread 안의 값이라 계속 그 안에 남아있음. 다음 _kill()이 해시(pages.buckets) 없음으로 읽도록 비우기. */
     spt->pages.buckets = NULL;
 }
-/* spt_kill()을 한 이후에 또 한 번 더 spt_kill()을 하게 되는 경우가 있나? 아니면. buckets가 NULL이어야, hash*/
