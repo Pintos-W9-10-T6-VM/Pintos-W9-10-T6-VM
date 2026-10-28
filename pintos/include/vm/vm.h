@@ -69,6 +69,8 @@ struct page {
 
     /* [SHW] 페이지 폴트 전, 쓰기 권한을 저장*/
     bool writable;
+    /* [SHW] 페이지가 스택을 위한 페이지인지 표시*/
+    bool is_stack;
 
     struct hash_elem spt_elem; /* Element in SPT. */
     /* Per-type data are binded into the union.

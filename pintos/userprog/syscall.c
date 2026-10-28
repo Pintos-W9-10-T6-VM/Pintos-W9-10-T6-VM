@@ -360,7 +360,10 @@ static bool sys_remove(const char *user_name)
 /* The main system call interface */
 /* [JE/YYJ] 사용자 요청 번호를 해석하고 프로세스 관리 함수에 연결한다. */
 void syscall_handler(struct intr_frame *f)
-{                       /* f는 사용자 레지스터와 복귀 위치를 담는다. */
+{
+    thread_current()->syscall_prev_rsp =
+        f->rsp; /* [SHW] 시스템 콜 이전에 사용자 스택의 rsp 저장*/
+    /* f는 사용자 레지스터와 복귀 위치를 담는다. */
     switch (f->R.rax) { /* 진입 시 RAX에 저장된 시스템 콜 번호로 분기한다. */
     case SYS_WRITE:     /* 기존 표준 출력 시스템 콜을 유지한다. */
         f->R.rax = sys_write(

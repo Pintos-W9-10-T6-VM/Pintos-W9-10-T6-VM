@@ -134,6 +134,8 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
         }
         uninit_new(page, upage, init, type, aux, page_initializer);
         page->writable = writable;
+        page->is_stack =
+            type & VM_MARKER_0; /* [SHW] VM_MARKER_0으로 스택인지 판단*/
 
         /* TODO: Insert the page into the spt. */
         /* [한국어 번역] TODO: 페이지를 spt에 삽입한다. */
@@ -232,8 +234,12 @@ static struct frame *vm_get_frame(void)
 
 /* Growing the stack. */
 /* [한국어 번역] 스택을 확장한다. */
-static void vm_stack_growth(void *addr UNUSED)
+static bool vm_stack_growth(void *addr)
 {
+    addr = pg_round_down(addr); /* [SHW] PGSIZE단위로 내림 처리 */
+
+    vm_alloc_page(VM_ANON | VM_MARKER_0, addr, true);
+    return vm_claim_page(addr);
 }
 
 /* Handle the fault on write_protected page */
@@ -244,12 +250,11 @@ static bool vm_handle_wp(struct page *page UNUSED)
 
 /* Return true on success */
 /* [한국어 번역] 성공하면 true를 반환한다. */
-bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
-                         bool user UNUSED, bool write UNUSED,
-                         bool not_present UNUSED)
+bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
+                         bool write UNUSED, bool not_present UNUSED)
 {
-    struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-    struct page *page = NULL;
+    struct supplemental_page_table *spt = &thread_current()->spt;
+    struct page *page = spt_find_page(spt, addr);
 
     // if (!is_writable(thread_current()->pml4)) {
     //     thread_current()->exit_status = -1;
@@ -259,6 +264,27 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
     /* [한국어 번역] TODO: 폴트의 유효성을 검사한다. */
     /* TODO: Your code goes here */
     /* [한국어 번역] TODO: 여기에 코드를 작성한다. */
+
+    /* [SHW] 이 페이지 폴트가 스택 성장인지 판단 */
+    if (page == NULL) {
+        uint64_t rsp;
+        if (user) {
+            rsp = f->rsp;
+        } else {
+            rsp = thread_current()->syscall_prev_rsp;
+        }
+        /* [SHW] 스택 성장 조건이 맞으면 스택 성장 */
+        if ((uint64_t)addr < USER_STACK &&
+            (uint64_t)addr >= USER_STACK - (1 << 20) &&
+            (uint64_t)addr >= rsp - 8) {
+
+            return vm_stack_growth(addr);
+        }
+        /* [SHW] 스택 성장 조건이 아니면 잘못된 페이지 폴트 */
+        else {
+            return false;
+        }
+    }
 
     return vm_do_claim_page(page);
 }
