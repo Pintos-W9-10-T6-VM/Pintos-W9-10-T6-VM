@@ -55,12 +55,11 @@ void hash_clear(struct hash *h, hash_action_func *destructor)
     for (i = 0; i < h->bucket_cnt; i++) {
         struct list *bucket = &h->buckets[i];
 
-        if (destructor != NULL) {
-            while (!list_empty(bucket)) {
-                struct list_elem *list_elem = list_pop_front(bucket);
-                struct hash_elem *hash_elem = list_elem_to_hash_elem(list_elem);
-                destructor(hash_elem, h->aux);
-            }
+        while (!list_empty(bucket)) {
+            struct list_elem *list_elem = list_pop_front(bucket);
+            struct hash_elem *hash_elem = list_elem_to_hash_elem(list_elem);
+            destructor(hash_elem, h->aux);
+            // hash_elem을 기반으로 page를 각각 해제.
         }
 
         list_init(bucket);
