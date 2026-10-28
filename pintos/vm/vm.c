@@ -1,6 +1,8 @@
 /* vm.c: Generic interface for virtual memory objects. */
 /* [한국어 번역] vm.c: 가상 메모리 객체를 위한 공통 인터페이스. */
 
+#include <string.h>
+
 #include "stdbool.h"
 #include "stddef.h"
 #include "threads/malloc.h"
@@ -83,6 +85,14 @@ static uint64_t hashing(const struct hash_elem *elem, void *aux UNUSED)
     return hash_bytes(&page_num, sizeof(p->va));
 }
 
+static void destructor(struct hash_elem *elem, void *aux UNUSED)
+{
+    struct page *page = hash_entry(elem, struct page, spt_elem);
+    free(page->frame);
+    destroy(page); // [CJG] destroy according to page type.
+    free(page);
+}
+
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
  * `vm_alloc_page`. */
@@ -158,14 +168,14 @@ struct page *spt_find_page(struct supplemental_page_table *spt, void *va)
     elem = hash_find(&spt->pages, &tmp.spt_elem);
 
     /* [CJG] If the provided SPT has page holding (va), or not. */
-    return (elem == NULL) ? NULL : hash_entry(elem, struct page, spt_elem);
+    return (elem != NULL) ? hash_entry(elem, struct page, spt_elem) : NULL;
 }
 
 /* Insert PAGE into spt with validation. */
 /* [한국어 번역] 유효성을 검사하여 PAGE를 spt에 삽입한다. */
 bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 {
-    bool result = hash_insert(&spt->pages, &page->spt_elem) == NULL;
+    bool result = (hash_insert(&spt->pages, &page->spt_elem) == NULL);
     /* [CJG] Check whether page(hash) insertion into the provided spt success or not*/
     return result;
 }
@@ -244,21 +254,23 @@ static bool vm_handle_wp(struct page *page UNUSED)
 
 /* Return true on success */
 /* [한국어 번역] 성공하면 true를 반환한다. */
-bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
-                         bool user UNUSED, bool write UNUSED,
-                         bool not_present UNUSED)
+bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr,
+                         bool user UNUSED, bool write UNUSED, bool not_present)
 {
-    struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
-    struct page *page = NULL;
+    if (!not_present) {
+        return false;
+    } /* [CJG] P비트(메모리 매핑)가 있는데도 fault가 난 경우 = PTE_U | PTE_W 위반. */
 
-    // if (!is_writable(thread_current()->pml4)) {
-    //     thread_current()->exit_status = -1;
-    //     process_exit();
-    // }
-    /* TODO: Validate the fault */
-    /* [한국어 번역] TODO: 폴트의 유효성을 검사한다. */
-    /* TODO: Your code goes here */
-    /* [한국어 번역] TODO: 여기에 코드를 작성한다. */
+    /* [CJG](userprog) not_present = (f->error_code & PF_P) == 0; */
+
+    struct supplemental_page_table *spt = &thread_current()->spt;
+    struct page *page = spt_find_page(spt, addr);
+
+    if (page == NULL) {
+        return false;
+    } /* [CJG] *NULL 같은 케이스(잘못된 주소). */
+
+    /* [CJG] For now, just consider the first case, lazy-loaded page. */
 
     return vm_do_claim_page(page);
 }
@@ -300,17 +312,16 @@ static bool vm_do_claim_page(struct page *page)
     frame->page = page;
     page->frame = frame;
 
-    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva, PTE_W)) {
+    if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva,
+                       page->writable)) {
         page->frame = NULL;
         palloc_free_page(frame->kva);
         free(frame);
 
-        frame->page = NULL;
         return false;
     }
 
-    /* [CJG] 'PTE_W' refers to flags. It means write-flag-bit is turned on. Must be considered all pages now have a write authority. */
-    /* [CJG] PTE_W라고 쓴 이유는 page->va의 권한 플래그(특히 쓰기 권한)을 활성화하기 위함입니다. 다만, 지금은 '모든 페이지가 쓰기 가능한 상태'입니다.*/
+    /* [CJG] page->va에 쓰기 권한이 있는 지 확인하고, pml4기반으로 frame->kva의 값을 넣습니다. */
 
     return swap_in(page, frame->kva);
 }
@@ -330,21 +341,80 @@ bool supplemental_page_table_init(struct supplemental_page_table *spt)
     return result;
 }
 
-/* Copy supplemental page table from src to dst */
-/* [한국어 번역] 보조 페이지 테이블을 src에서 dst로 복사한다. */
-bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
-                                  struct supplemental_page_table *src UNUSED)
+static bool uninit_page_copy(struct page *src_page)
 {
+    struct uninit_page *uninit = &src_page->uninit;
+
+    struct load_info *aux = malloc(sizeof *aux);
+    if (aux == NULL) {
+        return false;
+    }
+    memcpy(aux, uninit->aux, sizeof *aux);
+
+    if (!vm_alloc_page_with_initializer(uninit->type, src_page->va,
+                                        src_page->writable, uninit->init,
+                                        aux)) {
+        free(aux);
+        return false;
+    }
+    return vm_claim_page(src_page->va);
 }
 
-/* Free the resource hold by the supplemental page table */
-/* [한국어 번역] 보조 페이지 테이블이 보유한 자원을 해제한다. */
-void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED)
+static bool anon_page_copy(struct page *src_page)
 {
-    /* TODO: Destroy all the supplemental_page_table hold by thread and
-	 * TODO: writeback all the modified contents to the storage. */
-    /* [한국어 번역]
-     * TODO: 스레드가 보유한 보조 페이지 테이블 전체를 파괴하고,
-     * TODO: 수정된 모든 내용을 저장 장치에 다시 기록한다.
-     */
+    if (!vm_alloc_page(VM_ANON, src_page->va, src_page->writable)) {
+        return false;
+    }
+    if (!vm_claim_page(src_page->va)) {
+        return false;
+    }
+
+    struct page *dst_page = spt_find_page(&thread_current()->spt, src_page->va);
+    memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+    return true;
+}
+
+/* Copy supplemental page table from src to dst */
+/* [한국어 번역] 보조 페이지 테이블을 src에서 dst로 복사한다. */
+bool supplemental_page_table_copy(struct supplemental_page_table *dst,
+                                  struct supplemental_page_table *src)
+{
+    struct hash_iterator i;
+    bool copied;
+
+    hash_first(&i, &src->pages);
+    /* [CJG]  src->pages->bucket의 list_head = i->elem. */
+    while (hash_next(&i)) {
+        struct page *src_page = hash_entry(hash_cur(&i), struct page, spt_elem);
+        enum vm_type type = VM_TYPE(src_page->operations->type);
+
+        switch (type) {
+        case VM_UNINIT:
+            copied = uninit_page_copy(src_page);
+            break;
+        case VM_ANON:
+            copied = anon_page_copy(src_page);
+            break;
+        default:
+            copied = false;
+            break;
+        }
+
+        if (!copied) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void supplemental_page_table_kill(struct supplemental_page_table *spt)
+{
+    /* [CJG] _init() 실패(buckets == NULL) 뒤 종료 경로(_terminate(-1))에서 다시 불림. */
+    if (spt->pages.buckets == NULL) {
+        return;
+    }
+
+    hash_destroy(&spt->pages, destructor);
+    /* [CJG] spt는 thread 안의 값이라 계속 그 안에 남아있음. 다음 _kill()이 해시(pages.buckets) 없음으로 읽도록 비우기. */
+    spt->pages.buckets = NULL;
 }

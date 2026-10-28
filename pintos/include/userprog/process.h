@@ -1,7 +1,18 @@
 #ifndef USERPROG_PROCESS_H
 #define USERPROG_PROCESS_H
 
+#include "filesys/off_t.h"
+/* [CJG] userprog에서 load_info의 ofs를 몰라서 문제 날까봐 */
 #include "threads/thread.h"
+
+/* [SHW] 코드 로드시 lazy_load_segment에 넘겨줄 파일 정보*/
+/* [CJG] vm.c에서도 load_info를 활용하기 위해 process.h로 옮김. */
+struct load_info {
+    struct file *file;
+    off_t ofs;
+    uint32_t read_bytes;
+    uint32_t zero_bytes;
+};
 
 tid_t process_create_initd(const char *file_name);
 tid_t process_fork(const char *name, struct intr_frame *if_);
