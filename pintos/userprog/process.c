@@ -416,27 +416,28 @@ static void __do_fork(void *aux)
     /* TODO [YYJ 번역]: 준비된 자식의 실행 문맥으로 사용자 코드에 복귀한다. */
     if (succ) {                /* 모든 자원 복제가 성공한 경우다. */
         start->success = true; /* 부모가 확인할 성공 결과를 먼저 기록한다. */
-        sema_up(
-            &start
-                 ->completed); /* 부모를 깨운다. 이후 start에 다시 접근하지 않는다. */
-        do_iret(&if_); /* 복제한 레지스터로 자식의 사용자 코드에 복귀한다. */
-        NOT_REACHED(); /* 정상적으로 사용자 모드에 복귀하면 도달하지 않는다. */
+        sema_up(&start->completed);
+        /* 부모를 깨운다. 이후 start에 다시 접근하지 않는다. */
+        do_iret(&if_);
+        /* 복제한 레지스터로 자식의 사용자 코드에 복귀한다. */
+        NOT_REACHED();
+        /* 정상적으로 사용자 모드에 복귀하면 도달하지 않는다. */
     } /* 성공 경로를 끝낸다. */
 
 error: /* 모든 복제 실패가 모이는 공통 경로다. */
        // thread_exit ();
     /* TODO [YYJ 추가]: 실패해도 부모에게 알리고 자식의 부분 자원을 정리한다. */
     start->success = false; /* 부모가 TID_ERROR를 반환하도록 실패를 기록한다. */
-    sema_up(&start->completed); /* 실패 시에도 부모의 대기를 반드시 해제한다. */
-    process_terminate(
-        -1); /* 이후 start를 읽지 않고 기존 종료 경로로 정리한다. */
+    sema_up(&start->completed);
+    /* 실패 시에도 부모의 대기를 반드시 해제한다. */
+    process_terminate(-1);
+    /* 이후 start를 읽지 않고 기존 종료 경로로 정리한다. */
 } /* __do_fork 정의를 끝낸다. */
+
 /* process_init()는 현재 실질적인 초기화가 없는 기존 함수다. FD 목록은 아래
 thread.c 초기화 코드에서 스레드 생성 시 준비하고 부모 FD는 완료 알림 전에
 복제한다. 성공 알림 이후에 복제하면 부모가 FD를 닫거나 변경할 수 있어 잘못된다. */
 
-/* Switch the current execution context to the f_name.
- * Returns -1 on fail. */
 int process_exec(void *f_name)
 {
     /* initd()에서 전달받은 커널 명령어 복사본이다. */
@@ -455,11 +456,6 @@ int process_exec(void *f_name)
     char *save_ptr = NULL;
     bool success = false;
 
-    // /* We cannot use the intr_frame in the thread structure.
-    //  * This is because when current thread rescheduled,
-    //  * it stores the execution information to the member. */
-    /* 사용자 실행 문맥을 초기화한다. */
-    //	struct intr_frame _if;
     struct intr_frame _if = {0};
     _if.ds = _if.es = _if.ss = SEL_UDSEG;
     _if.cs = SEL_UCSEG;
@@ -483,27 +479,20 @@ int process_exec(void *f_name)
 
     argv[argc] = NULL;
 
-    // /* We first kill the current context */
-    /* 기존 주소 공간을 정리한다. */
     process_cleanup();
 
-    // /* And then load the binary */
-    /* 전체 명령어가 아니라 첫 단어인 실행 파일 이름을 전달한다. */
-    // success = load (file_name, &_if);
+#ifdef VM
+    if (!supplemental_page_table_init(&thread_current()->spt)) {
+        goto done;
+    }
+#endif
+
     lock_acquire(
         &filesys_lock); /* [JE/YYJ] ELF 열기·읽기·닫기 중 다른 파일 시스템 호출을 막는다. */
-    success =
-        load(argv[0],
-             &_if); /* [YJH] 기존 로더가 실행 파일과 사용자 스택을 준비한다. */
-    lock_release(
-        &filesys_lock); /* load가 성공하든 실패하든 여기서 락을 반납한다. */
-    /* 현재 load 내부에서 락을 잡지 않으므로 위 위치에서 한 번만 잡는다. JE가 load 내부에 같은
-	락을 넣으면 중복 획득을 제거해야 한다. process_wait()와 fork 완료 대기 중에는 이 락을 보유하지 않는다. */
-
-    // /* If load failed, quit. */
-    // palloc_free_page (file_name);
-    // if (!success)
-    // 	return -1;
+    success = load(argv[0], &_if);
+    /* [YJH] 기존 로더가 실행 파일과 사용자 스택을 준비한다. */
+    lock_release(&filesys_lock);
+    /* load가 성공하든 실패하든 여기서 락을 반납한다. */
 
     /* load()가 준비한 사용자 스택에 인자들을 배치한다. */
     if (success) {
@@ -1435,14 +1424,6 @@ static bool install_page(void *upage, void *kpage, bool writable)
 /* From here, codes will be used after project 3.
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
-
-/* [SHW] 코드 로드시 lazy_load_segment에 넘겨줄 파일 정보*/
-struct load_info {
-    struct file *file;
-    off_t ofs;
-    uint32_t read_bytes;
-    uint32_t zero_bytes;
-};
 
 static bool lazy_load_segment(struct page *page, void *aux)
 {
