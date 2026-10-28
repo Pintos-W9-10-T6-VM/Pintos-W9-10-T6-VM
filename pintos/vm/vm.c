@@ -261,21 +261,7 @@ static bool vm_handle_wp(struct page *page UNUSED)
 /* Return true on success */
 /* [한국어 번역] 성공하면 true를 반환한다. */
 bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
-                         bool write UNUSED, bool not_present UNUSED)
-{
-    struct supplemental_page_table *spt = &thread_current()->spt;
-    struct page *page = spt_find_page(spt, addr);
-
-    // if (!is_writable(thread_current()->pml4)) {
-    //     thread_current()->exit_status = -1;
-    //     process_exit();
-    // }
-    /* TODO: Validate the fault */
-    /* [한국어 번역] TODO: 폴트의 유효성을 검사한다. */
-    /* TODO: Your code goes here */
-    /* [한국어 번역] TODO: 여기에 코드를 작성한다. */
-bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr,
-                         bool user UNUSED, bool write UNUSED, bool not_present)
+                         bool write UNUSED, bool not_present)
 {
     if (!not_present) {
         return false;
@@ -285,10 +271,6 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr,
 
     struct supplemental_page_table *spt = &thread_current()->spt;
     struct page *page = spt_find_page(spt, addr);
-
-    if (page == NULL) {
-        return false;
-    } /* [CJG] *NULL 같은 케이스(잘못된 주소). */
 
     /* [CJG] For now, just consider the first case, lazy-loaded page. */
 
