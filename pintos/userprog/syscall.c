@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "userprog/gdt.h"
@@ -20,6 +21,9 @@
 #include <debug.h>           /* NOT_REACHED를 명시적으로 가져온다. */
 #include "threads/init.h" /* [YJH] power_off()로 시스템 전원을 끄기 위해 사용한다. */
 #include <stdint.h>       /* INT32_MAX를 사용한다. */
+#ifdef VM
+#include "vm/vm.h"
+#endif
 
 struct lock
     filesys_lock; /* [JE/YYJ] 파일 로딩과 파일 시스템 호출이 함께 사용할 락이다. */
@@ -357,6 +361,29 @@ static bool sys_remove(const char *user_name)
     return success;
 }
 
+#ifdef VM
+static void *sys_mmap(void *addr, size_t length, int writable, int fd,
+                      off_t offset)
+{
+    if (fd == 0 || fd == 1) {
+        return NULL;
+    }
+
+    lock_acquire(&filesys_lock);
+
+    struct file *file = process_get_file(fd);
+    bool mapped = (file != NULL) && (file_length(file) > 0);
+
+    lock_release(&filesys_lock);
+
+    if (!mapped) {
+        return NULL;
+    }
+
+    return do_mmap(addr, length, writable, file, offset);
+}
+#endif
+
 /* The main system call interface */
 /* [JE/YYJ] 사용자 요청 번호를 해석하고 프로세스 관리 함수에 연결한다. */
 void syscall_handler(struct intr_frame *f)
@@ -439,9 +466,15 @@ void syscall_handler(struct intr_frame *f)
         break;
     case SYS_HALT: /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
         power_off(); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
-    default:         /* 아직 지원하지 않는 번호를 요청한 경우다. */
-                     // thread_exit();
-        process_terminate(
-            -1); /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
+#ifdef VM
+    case SYS_MMAP:
+        f->R.rax =
+            (uint64_t)sys_mmap((void *)f->R.rdi, (size_t)f->R.rsi,
+                               (int)f->R.rdx, (int)f->R.r10, (off_t)f->R.r8);
+        break;
+#endif
+    default: /* 아직 지원하지 않는 번호를 요청한 경우다. */
+        process_terminate(-1);
+        /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
     }
 }
