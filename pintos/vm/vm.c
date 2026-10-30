@@ -184,6 +184,10 @@ bool spt_insert_page(struct supplemental_page_table *spt, struct page *page)
 
 void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 {
+    /* [SHW] spt에서 해당 페이지 제거 및 PTE 제거*/
+    hash_delete(&spt->pages, &page->spt_elem);
+    pml4_clear_page(thread_current()->pml4, page->va);
+
     vm_dealloc_page(page);
 }
 

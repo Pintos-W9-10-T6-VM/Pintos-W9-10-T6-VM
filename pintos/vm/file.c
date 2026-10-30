@@ -1,6 +1,11 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 /* [한국어 번역] file.c: 메모리에 매핑된 파일 객체(mmap 객체)의 구현. */
 
+#include "filesys/file.h"
+#include "threads/mmu.h"
+#include "threads/palloc.h"
+#include "threads/thread.h"
+#include "threads/malloc.h"
 #include "vm/vm.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
@@ -51,7 +56,18 @@ static bool file_backed_swap_out(struct page *page)
 /* [한국어 번역] 파일 기반 페이지를 파괴한다. PAGE 자체는 호출자가 해제한다. */
 static void file_backed_destroy(struct page *page)
 {
-    struct file_page *file_page UNUSED = &page->file;
+    struct file_page *file_page = &page->file;
+
+    /* [SHW] PTE가 dirty이면 write-back */
+    if (pml4_is_dirty(thread_current()->pml4, page->va)) {
+        file_write_at(file_page->file, page->frame->kva,
+                      file_page->file_read_bytes, file_page->offset);
+    }
+
+    /* [SHW] 파일 닫기 및 프레임 해제 */
+    file_close(file_page->file);
+    palloc_free_page(page->frame->kva);
+    free(page->frame);
 }
 
 /* Do the mmap */
