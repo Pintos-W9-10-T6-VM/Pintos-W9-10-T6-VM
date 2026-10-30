@@ -143,7 +143,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
                                             lazy_load_file, load_info)) {
             free(load_info);
             return NULL;
-        }
+        } // lazy_load_file() is not written. That's the point I start with tommorrow(10/31)
 
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
