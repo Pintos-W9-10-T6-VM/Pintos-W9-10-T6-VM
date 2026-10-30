@@ -102,7 +102,7 @@ static bool user_buffer_readable(const void *buffer, size_t size)
 }
 
 /* [JE/YYJ] 사용자 문자열을 검사하며 커널 페이지로 복사한다. 페이지 소유권은 호출자에게 넘긴다. */
-static char *user_string_copy(const char *user_string)
+static char *verify_user_name_and_copy(const char *user_string)
 { /* 사용자 주소를 검증 전에 문자열 함수에 넘기지 않는다. */
     char *copy = palloc_get_page(
         0); /* 사용자 주소 공간 교체 이후에도 유지할 커널 페이지를 받는다. */
@@ -162,32 +162,37 @@ static bool user_buffer_writable(void *buffer, size_t size)
     return true; /* 전체 범위에 쓸 수 있다. */
 }
 
+static int alloc_file_and_fd(struct lock *filesys_lock, char *name)
+{
+    lock_acquire(filesys_lock);
+
+    int fd = -1;
+    struct file *file = filesys_open(name);
+    if (file != NULL) {
+        fd = process_add_file(file);
+        if (fd == -1) {
+            file_close(file);
+        }
+    }
+    lock_release(filesys_lock);
+    return fd;
+}
+
 /* [YYJ] 사용자 파일 이름을 검증·복사한 뒤 일반 FD를 만든다. */
 static int sys_open(const char *user_name)
-{ /* 문자열을 다룰 때 파일 시스템 락을 먼저 잡지 않는다. */
-    char *name = user_string_copy(
-        user_name);     /* 커널에서 사용할 안전한 이름 페이지를 만든다. */
-    if (name == NULL) { /* 페이지 할당 실패를 확인한다. */
-        return -1;      /* 아직 열린 파일이 없으므로 실패만 반환한다. */
+{
+    char *name = verify_user_name_and_copy(user_name);
+    if (name == NULL) {
+        return -1;
     }
-    lock_acquire(
-        &filesys_lock); /* filesys_open과 FD 등록·실패 정리를 함께 보호한다. */
-    struct file *file =
-        filesys_open(name); /* 기존 파일을 연다. 없으면 NULL이다. */
-    int fd = -1;            /* 성공하기 전까지 반환값은 실패다. */
-    if (file != NULL) {     /* 파일 열기에 성공했는지 확인한다. */
-        fd = process_add_file(
-            file); /* 성공하면 파일 소유권을 현재 프로세스의 FD 기록에 넘긴다. */
-        if (fd == -1) { /* FD 기록 생성 실패를 검사한다. */
-            file_close(
-                file); /* 소유권을 넘기지 못한 열린 파일을 즉시 닫는다. */
-        }
-    } /* 파일 열기 후 처리를 끝낸다. */
-    lock_release(
-        &filesys_lock); /* 사용자 코드로 복귀하기 전에 락을 반납한다. */
-    palloc_free_page(
-        name); /* 파일 시스템이 이름을 저장할 필요는 없으므로 복사 페이지를 반납한다. */
-    return fd; /* FD 또는 -1을 반환한다. */
+
+    int fd = alloc_file_and_fd(&filesys_lock, name);
+    if (fd == -1) {
+        return -1;
+    }
+
+    palloc_free_page(name);
+    return fd;
 }
 
 /* [YYJ] 표준 입력 또는 일반 파일을 사용자 목적지 버퍼로 읽는다. */
@@ -322,7 +327,7 @@ static bool sys_create(const char *user_name, unsigned initial_size)
 {
 
     //이름 복사 → 락 안에서 filesys_create 호출 → 락 해제 → 페이지 해제 순서
-    char *name = user_string_copy(user_name);
+    char *name = verify_user_name_and_copy(user_name);
     if (name == NULL) {
         return false;
     }
@@ -343,7 +348,7 @@ static bool sys_create(const char *user_name, unsigned initial_size)
 //[JE]
 static bool sys_remove(const char *user_name)
 {
-    char *name = user_string_copy(user_name);
+    char *name = verify_user_name_and_copy(user_name);
     if (name == NULL) {
         return false;
     }
@@ -415,7 +420,7 @@ void syscall_handler(struct intr_frame *f)
         sys_close((int)f->R.rdi); /* 현재 프로세스가 보유한 FD를 닫는다. */
         break;                    /* close 분기를 끝낸다. */
     case SYS_FORK: { /* 이 분기의 지역 변수들이 다른 case와 섞이지 않도록 블록을 연다. */
-        char *name = user_string_copy(
+        char *name = verify_user_name_and_copy(
             (const char *)f->R
                 .rdi); /* 사용자 자식 이름을 안전한 커널 페이지에 복사한다. */
         if (name == NULL) { /* 이름 복사용 페이지 할당 실패를 처리한다. */
@@ -431,7 +436,7 @@ void syscall_handler(struct intr_frame *f)
         break;          /* fork 분기를 끝낸다. */
     } /* fork의 지역 변수 범위를 끝낸다. */
     case SYS_EXEC: { /* exec 명령어를 보관할 지역 변수 범위를 연다. */
-        char *cmdline = user_string_copy(
+        char *cmdline = verify_user_name_and_copy(
             (const char *)f->R
                 .rdi); /* 이전 사용자 주소 공간을 없애기 전에 명령어를 복사한다. */
         if (cmdline == NULL) { /* 커널 명령어 페이지 할당 실패를 확인한다. */

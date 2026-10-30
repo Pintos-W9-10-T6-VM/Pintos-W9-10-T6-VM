@@ -1510,11 +1510,6 @@ static bool setup_stack(struct intr_frame *if_)
     bool success = false;
     void *stack_bottom = (void *)(((uint8_t *)USER_STACK) - PGSIZE);
 
-    /* TODO: Map the stack on stack_bottom and claim the page immediately.
-	 * TODO: If success, set the rsp accordingly.
-	 * TODO: You should mark the page is stack. */
-    /* TODO: Your code goes here */
-
     /* [SHW] stack_bottom에 사용자 스택 페이지를 VM_ANON으로 등록, 프레임 즉시 할당
      * (사용자 코드 실행 전에 setup_arguments가 인자를 써야 하므로)
      * [SHW] VM_MARKER를 더해서 해당 페이지가 스택인지 아닌지 표시한다.*/

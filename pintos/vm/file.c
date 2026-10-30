@@ -1,8 +1,15 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 /* [한국어 번역] file.c: 메모리에 매핑된 파일 객체(mmap 객체)의 구현. */
 
+#include "threads/malloc.h"
+#include "filesys/file.h"
+#include "stddef.h"
+#include "threads/synch.h"
+#include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/vm.h"
+#include "userprog/syscall.h"
+#include "userprog/process.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
@@ -75,6 +82,28 @@ static bool is_valid_addr_and_length(void *addr, size_t length, off_t offset)
     return true;
 }
 
+static bool require_page_registration(struct supplemental_page_table *spt,
+                                      void *addr, size_t length)
+{
+    /* [CJG] Check whether any page already registed in the range where we'll allocate. */
+    for (void *va = addr; va < addr + length; va += PGSIZE) {
+        if (spt_find_page(spt, va) == NULL) {
+            return NULL;
+        }
+    }
+}
+
+static struct file *register_memory_mapped_file(struct file *file)
+{
+    lock_acquire(&filesys_lock);
+    struct file *memory_mapped_file = file_reopen(file);
+    lock_release(&filesys_lock);
+    if (memory_mapped_file == NULL) {
+        return NULL;
+    }
+    return memory_mapped_file;
+}
+
 /* Do the mmap */
 /* [한국어 번역] mmap을 수행한다. */
 void *do_mmap(void *addr, size_t length, int writable, struct file *file,
@@ -84,8 +113,30 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
         return NULL;
     }
 
-    while (read_bytes > 0 || zero_bytes > 0)
-    
+    struct supplemental_page_table *spt = &thread_current()->spt;
+    if (!require_page_registration(spt, addr, length)) {
+        return NULL;
+    }
+
+    struct file *memory_mapped_file = register_memory_mapped_file(file);
+    if (!memory_mapped_file) {
+        return NULL;
+    }
+
+    struct load_info *load_info = malloc(sizeof *load_info);
+    if (load_info == NULL) {
+        return false;
+    }
+
+    // When _find() failed, it means the `page adress` is already utilized by code, stack, or an earler mmap.
+    // -> It's natural in this `do_mmap() context` always to send a NULL, because the purpose of do_mmap() itself is "to allocate a page at the user adress."
+
+    bool page_alloc = vm_alloc_page_with_initializer(
+        VM_FILE, addr, page->writable, vm_initializer * init, void *aux);
+    if (!page_alloc) {
+        return NULL;
+    }
+
     return addr;
 }
 
