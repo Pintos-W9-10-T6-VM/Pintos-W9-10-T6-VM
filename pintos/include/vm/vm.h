@@ -72,6 +72,9 @@ struct page {
     /* [SHW] 페이지가 스택을 위한 페이지인지 표시*/
     bool is_stack;
 
+    /* [YYJ] 파일이 큰 경우 여러 페이지일 수도 있으니. */
+    size_t mmap_how_many_page;
+
     struct hash_elem spt_elem; /* Element in SPT. */
     /* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */

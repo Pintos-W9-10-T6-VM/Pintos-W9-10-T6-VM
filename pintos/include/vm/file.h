@@ -1,12 +1,18 @@
 #ifndef VM_FILE_H
 #define VM_FILE_H
 #include "filesys/file.h"
+#include "filesys/off_t.h"
 #include "vm/vm.h"
+#include <stdint.h>
 
 struct page;
 enum vm_type;
 
+/* [YYJ] read나 write할 때 필요한 정보 */
 struct file_page {
+    struct file *file;
+    off_t ofs;
+    uint32_t read_bytes;
 };
 
 void vm_file_init(void);
