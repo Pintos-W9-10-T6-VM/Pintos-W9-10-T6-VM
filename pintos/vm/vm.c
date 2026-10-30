@@ -100,6 +100,21 @@ static void destructor(struct hash_elem *elem, void *aux UNUSED)
  * 초기화 함수를 가진 대기 상태의 페이지 객체를 생성한다.
  * 페이지를 직접 생성하지 말고 이 함수나 vm_alloc_page를 통해 생성한다.
  */
+
+typedef bool page_initializer(struct page *, enum vm_type, void *kva);
+
+static page_initializer *get_page_initializer(enum vm_type type)
+{
+    switch (VM_TYPE(type)) {
+    case VM_ANON:
+        return anon_initializer;
+    case VM_FILE:
+        return file_backed_initializer;
+    default:
+        return NULL;
+    }
+}
+
 bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
                                     bool writable, vm_initializer *init,
                                     void *aux)
@@ -111,52 +126,30 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage,
 
     /* Check wheter the upage is already occupied or not. */
     /* [한국어 번역] upage가 이미 사용 중인지 확인한다. */
-    if (spt_find_page(spt, upage) == NULL) {
-        /* TODO: Create the page, fetch the initialier according to the VM type,
-		 * TODO: and then create "uninit" page struct by calling uninit_new. You
-		 * TODO: should modify the field after calling the uninit_new. */
-        /* [한국어 번역]
-         * TODO: 페이지를 생성하고 VM 타입에 맞는 초기화 함수를 선택한 다음,
-         * TODO: uninit_new를 호출하여 "uninit" 페이지 구조체를 생성한다.
-         * TODO: 필드 수정은 uninit_new를 호출한 뒤에 해야 한다.
-         */
-
-        struct page *page = malloc(sizeof(struct page));
-        if (page == NULL) {
-            goto err;
-        }
-
-        /* [SHW] 현재 initializer를 페이지 타입에 따라 initializer를 바꿔줘야한다. */
-        bool (*page_initializer)(struct page *page, enum vm_type type,
-                                 void *kva);
-        switch (VM_TYPE(type)) {
-        case VM_ANON:
-            page_initializer = anon_initializer;
-            break;
-
-        case VM_FILE:
-            page_initializer = file_backed_initializer;
-            break;
-
-        default:
-            free(page);
-            goto err;
-        }
-        uninit_new(page, upage, init, type, aux, page_initializer);
-        page->writable = writable;
-        page->is_stack =
-            type & VM_MARKER_0; /* [SHW] VM_MARKER_0으로 스택인지 판단*/
-
-        /* TODO: Insert the page into the spt. */
-        /* [한국어 번역] TODO: 페이지를 spt에 삽입한다. */
-        if (!spt_insert_page(&thread_current()->spt, page)) {
-            free(page);
-            goto err;
-        }
-        return true;
+    if (spt_find_page(spt, upage) != NULL) {
+        return false;
     }
-err:
-    return false;
+
+    page_initializer *page_initializer = get_page_initializer(type);
+    if (page_initializer == NULL) {
+        return false;
+    }
+
+    struct page *page = malloc(sizeof(struct page));
+    if (page == NULL) {
+        return false;
+    }
+
+    uninit_new(page, upage, init, type, aux, page_initializer);
+    page->writable = writable;
+    page->is_stack =
+        type & VM_MARKER_0; /* [SHW] VM_MARKER_0으로 스택인지 판단*/
+
+    if (!spt_insert_page(spt, page)) {
+        free(page);
+        return false;
+    }
+    return true;
 }
 
 /* Find VA from spt and return page. On error, return NULL. */

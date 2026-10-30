@@ -1,6 +1,7 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 /* [한국어 번역] file.c: 메모리에 매핑된 파일 객체(mmap 객체)의 구현. */
 
+#include "round.h"
 #include "threads/malloc.h"
 #include "filesys/file.h"
 #include "stddef.h"
@@ -121,6 +122,25 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     struct file *memory_mapped_file = register_memory_mapped_file(file);
     if (!memory_mapped_file) {
         return NULL;
+    }
+
+    off_t bytes_after_offset = file_length(memory_mapped_file) - offset;
+    size_t read_bytes = (length < (size_t)bytes_after_offset)
+                            ? length
+                            : (size_t)bytes_after_offset;
+    size_t zero_bytes = ROUND_UP(length, PGSIZE) - read_bytes;
+
+    void *va = addr;
+    off_t ofs = offset;
+
+    while (read_bytes > 0 || zero_bytes > 0) {
+        size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+        size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+        read_bytes -= page_read_bytes;
+        zero_bytes -= page_zero_bytes;
+        va += PGSIZE;
+        ofs += page_read_bytes;
     }
 
     struct load_info *load_info = malloc(sizeof *load_info);
