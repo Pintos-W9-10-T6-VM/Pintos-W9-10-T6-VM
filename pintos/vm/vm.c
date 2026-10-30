@@ -258,22 +258,9 @@ static bool vm_handle_wp(struct page *page UNUSED)
 {
 }
 
-/* Return true on success */
-/* [한국어 번역] 성공하면 true를 반환한다. */
-bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
-                         bool write UNUSED, bool not_present)
+static bool is_stack_growth_possible(struct page *page, void *addr, bool user,
+                                     struct intr_frame *f)
 {
-    if (!not_present) {
-        return false;
-    } /* [CJG] P비트(메모리 매핑)가 있는데도 fault가 난 경우 = PTE_U | PTE_W 위반. */
-
-    /* [CJG](userprog) not_present = (f->error_code & PF_P) == 0; */
-
-    struct supplemental_page_table *spt = &thread_current()->spt;
-    struct page *page = spt_find_page(spt, addr);
-
-    /* [CJG] For now, just consider the first case, lazy-loaded page. */
-
     /* [SHW] 이 페이지 폴트가 스택 성장인지 판단 */
     if (page == NULL) {
         uint64_t rsp;
@@ -293,6 +280,24 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
         else {
             return false;
         }
+    }
+    return true;
+}
+
+/* Return true on success */
+/* [한국어 번역] 성공하면 true를 반환한다. */
+bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
+                         bool write UNUSED, bool not_present)
+{
+    if (!not_present) {
+        return false;
+    } /* [CJG] P비트(메모리 매핑)가 있는데도 fault가 난 경우 = PTE_U | PTE_W 위반. */
+
+    struct supplemental_page_table *spt = &thread_current()->spt;
+    struct page *page = spt_find_page(spt, addr);
+
+    if (!is_stack_growth_possible(page, addr, user, f)) {
+        return false;
     }
 
     return vm_do_claim_page(page);
@@ -325,16 +330,8 @@ bool vm_claim_page(void *va)
     return vm_do_claim_page(page);
 }
 
-/* Claim the PAGE and set up the mmu. */
-/* [한국어 번역] PAGE의 실제 메모리를 확보하고 MMU를 설정한다. */
-static bool vm_do_claim_page(struct page *page)
+static bool is_pml4_setable(struct page *page, struct frame *frame)
 {
-    struct frame *frame = vm_get_frame();
-
-    /* Set links for each other. */
-    frame->page = page;
-    page->frame = frame;
-
     if (!pml4_set_page(thread_current()->pml4, page->va, frame->kva,
                        page->writable)) {
         page->frame = NULL;
@@ -343,8 +340,20 @@ static bool vm_do_claim_page(struct page *page)
 
         return false;
     }
+}
 
-    /* [CJG] page->va에 쓰기 권한이 있는 지 확인하고, pml4기반으로 frame->kva의 값을 넣습니다. */
+/* Claim the PAGE and set up the mmu. */
+/* [한국어 번역] PAGE의 실제 메모리를 확보하고 MMU를 설정한다. */
+static bool vm_do_claim_page(struct page *page)
+{
+    struct frame *frame = vm_get_frame();
+
+    frame->page = page;
+    page->frame = frame;
+
+    if (!is_pml4_setable(page, frame)) {
+        return false;
+    }
 
     return swap_in(page, frame->kva);
 }

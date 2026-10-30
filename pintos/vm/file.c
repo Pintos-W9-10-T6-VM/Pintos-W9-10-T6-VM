@@ -1,6 +1,7 @@
 /* file.c: Implementation of memory backed file object (mmaped object). */
 /* [한국어 번역] file.c: 메모리에 매핑된 파일 객체(mmap 객체)의 구현. */
 
+#include "threads/vaddr.h"
 #include "vm/vm.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
@@ -54,11 +55,38 @@ static void file_backed_destroy(struct page *page)
     struct file_page *file_page UNUSED = &page->file;
 }
 
+static bool is_valid_addr_and_length(void *addr, size_t length, off_t offset)
+{
+    void *end = addr + length;
+
+    if (addr == NULL || pg_ofs(addr) != 0 || length <= 0 ||
+        pg_ofs(offset) != 0) {
+        return false;
+    }
+
+    if (end < addr) {
+        return false;
+    } /* [CJG] Overflow 방지. */
+
+    if (!is_user_vaddr((void *)(end - 1))) {
+        return false;
+    }
+
+    return true;
+}
+
 /* Do the mmap */
 /* [한국어 번역] mmap을 수행한다. */
 void *do_mmap(void *addr, size_t length, int writable, struct file *file,
               off_t offset)
 {
+    if (!is_valid_addr_and_length(addr, length, offset)) {
+        return NULL;
+    }
+
+    while (read_bytes > 0 || zero_bytes > 0)
+    
+    return addr;
 }
 
 /* Do the munmap */

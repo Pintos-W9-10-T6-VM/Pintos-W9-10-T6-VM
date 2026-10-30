@@ -369,14 +369,15 @@ static void *sys_mmap(void *addr, size_t length, int writable, int fd,
         return NULL;
     }
 
+    /* [CJG] file은 중간에 다른 스레드가 Scheduling으로 읽으면 안 됌. */
     lock_acquire(&filesys_lock);
 
     struct file *file = process_get_file(fd);
-    bool mapped = (file != NULL) && (file_length(file) > 0);
+    bool is_mappable = (file != NULL) && (file_length(file) > 0);
 
     lock_release(&filesys_lock);
 
-    if (!mapped) {
+    if (!is_mappable) {
         return NULL;
     }
 
