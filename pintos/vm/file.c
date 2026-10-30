@@ -4,8 +4,10 @@
 #include "filesys/file.h"
 #include "threads/mmu.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/malloc.h"
+#include "userprog/syscall.h"
 #include "vm/vm.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
@@ -59,6 +61,7 @@ static void file_backed_destroy(struct page *page)
     struct file_page *file_page = &page->file;
 
     /* [SHW] PTE가 dirty이면 write-back */
+    lock_acquire(&filesys_lock);
     if (pml4_is_dirty(thread_current()->pml4, page->va)) {
         file_write_at(file_page->file, page->frame->kva,
                       file_page->file_read_bytes, file_page->offset);
@@ -66,6 +69,8 @@ static void file_backed_destroy(struct page *page)
 
     /* [SHW] 파일 닫기 및 프레임 해제 */
     file_close(file_page->file);
+    lock_release(&filesys_lock);
+
     palloc_free_page(page->frame->kva);
     free(page->frame);
 }

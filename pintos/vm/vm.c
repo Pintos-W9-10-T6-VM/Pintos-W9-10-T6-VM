@@ -88,8 +88,10 @@ static uint64_t hashing(const struct hash_elem *elem, void *aux UNUSED)
 static void destructor(struct hash_elem *elem, void *aux UNUSED)
 {
     struct page *page = hash_entry(elem, struct page, spt_elem);
-    free(page->frame);
-    destroy(page); // [CJG] destroy according to page type.
+    /* [SHW] pml4에서 해당 페이지 PTE 제거*/
+    pml4_clear_page(thread_current()->pml4, page->va);
+    // [CJG] destroy according to page type. [SHW] free(page->frame)은 destroy(page)에서 실행하도록 수정
+    destroy(page);
     free(page);
 }
 

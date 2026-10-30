@@ -2,8 +2,10 @@
 /* [한국어 번역] anon.c: 디스크 이미지와 관련 없는 페이지(익명 페이지)의 구현. */
 
 #include "stdbool.h"
+#include "threads/palloc.h"
 #include "vm/vm.h"
 #include "devices/disk.h"
+#include "threads/malloc.h"
 
 /* DO NOT MODIFY BELOW LINE */
 /* [한국어 번역] 아래 줄을 수정하지 말 것. */
@@ -68,4 +70,8 @@ static bool anon_swap_out(struct page *page)
 static void anon_destroy(struct page *page)
 {
     struct anon_page *anon_page = &page->anon;
+    if (page->frame != NULL) {
+        palloc_free_page(page->frame->kva);
+        free(page->frame);
+    }
 }
