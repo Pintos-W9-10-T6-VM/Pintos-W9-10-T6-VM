@@ -1,10 +1,12 @@
 /* vm.c: Generic interface for virtual memory objects. */
 /* [한국어 번역] vm.c: 가상 메모리 객체를 위한 공통 인터페이스. */
 
+#include <stdint.h>
 #include <string.h>
 
 #include "stdbool.h"
 #include "stddef.h"
+#include "threads/interrupt.h"
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "threads/palloc.h"
@@ -65,6 +67,9 @@ enum vm_type page_get_type(struct page *page)
 static struct frame *vm_get_victim(void);
 static bool vm_do_claim_page(struct page *page);
 static struct frame *vm_evict_frame(void);
+
+/* [SHW] 유저 rsp 반환 함수*/
+static uint64_t user_rsp(struct intr_frame *f, bool user);
 
 static bool less(const struct hash_elem *elem1, const struct hash_elem *elem2,
                  void *aux UNUSED)
@@ -258,6 +263,22 @@ static bool vm_stack_growth(void *addr)
     return vm_claim_page(addr);
 }
 
+/* [SHW] 이 페이지 폴트가 스택 성장인지 판단 */
+bool stack_growth(void *addr, uint64_t rsp)
+{
+    if ((uint64_t)addr < USER_STACK &&
+        (uint64_t)addr >= USER_STACK - (1 << 20) && (uint64_t)addr >= rsp - 8) {
+
+        return vm_stack_growth(addr);
+    }
+    return false;
+}
+
+static uint64_t user_rsp(struct intr_frame *f, bool user)
+{
+    return user ? f->rsp : thread_current()->syscall_prev_rsp;
+}
+
 /* Handle the fault on write_protected page */
 /* [한국어 번역] 쓰기 보호된 페이지에서 발생한 폴트를 처리한다. */
 static bool vm_handle_wp(struct page *page UNUSED)
@@ -280,25 +301,8 @@ bool vm_try_handle_fault(struct intr_frame *f, void *addr, bool user,
 
     /* [CJG] For now, just consider the first case, lazy-loaded page. */
 
-    /* [SHW] 이 페이지 폴트가 스택 성장인지 판단 */
     if (page == NULL) {
-        uint64_t rsp;
-        if (user) {
-            rsp = f->rsp;
-        } else {
-            rsp = thread_current()->syscall_prev_rsp;
-        }
-        /* [SHW] 스택 성장 조건이 맞으면 스택 성장 */
-        if ((uint64_t)addr < USER_STACK &&
-            (uint64_t)addr >= USER_STACK - (1 << 20) &&
-            (uint64_t)addr >= rsp - 8) {
-
-            return vm_stack_growth(addr);
-        }
-        /* [SHW] 스택 성장 조건이 아니면 잘못된 페이지 폴트 */
-        else {
-            return false;
-        }
+        return stack_growth(addr, user_rsp(f, user));
     }
 
     return vm_do_claim_page(page);
