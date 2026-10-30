@@ -83,8 +83,8 @@ static bool is_valid_addr_and_length(void *addr, size_t length, off_t offset)
     return true;
 }
 
-static bool require_page_registration(struct supplemental_page_table *spt,
-                                      void *addr, size_t length)
+static bool is_page_range_unused(struct supplemental_page_table *spt,
+                                 void *addr, size_t length)
 {
     /* [CJG] Check whether any page already registed in the range where we'll allocate. */
     for (void *va = addr; va < addr + length; va += PGSIZE) {
@@ -92,6 +92,7 @@ static bool require_page_registration(struct supplemental_page_table *spt,
             return NULL;
         }
     }
+    return true;
 }
 
 static struct file *register_memory_mapped_file(struct file *file)
@@ -105,8 +106,8 @@ static struct file *register_memory_mapped_file(struct file *file)
     return memory_mapped_file;
 }
 
-/* Do the mmap */
-/* [한국어 번역] mmap을 수행한다. */
+// When _find() failed, it means the `page adress` is already utilized by code, stack, or an earler mmap.
+// -> It's natural in this `do_mmap() context` always to send a NULL, because the purpose of do_mmap() itself is "to allocate a page at the user adress."
 void *do_mmap(void *addr, size_t length, int writable, struct file *file,
               off_t offset)
 {
@@ -115,7 +116,7 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     }
 
     struct supplemental_page_table *spt = &thread_current()->spt;
-    if (!require_page_registration(spt, addr, length)) {
+    if (!is_page_range_unused(spt, addr, length)) {
         return NULL;
     }
 
@@ -131,32 +132,24 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
     size_t zero_bytes = ROUND_UP(length, PGSIZE) - read_bytes;
 
     void *va = addr;
-    off_t ofs = offset;
-
     while (read_bytes > 0 || zero_bytes > 0) {
         size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
         size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
+        struct load_info *load_info = set_load_info(
+            memory_mapped_file, offset, page_read_bytes, page_zero_bytes);
+
+        if (!vm_alloc_page_with_initializer(VM_FILE, va, writable,
+                                            lazy_load_file, load_info)) {
+            free(load_info);
+            return NULL;
+        }
+
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         va += PGSIZE;
-        ofs += page_read_bytes;
+        offset += page_read_bytes;
     }
-
-    struct load_info *load_info = malloc(sizeof *load_info);
-    if (load_info == NULL) {
-        return false;
-    }
-
-    // When _find() failed, it means the `page adress` is already utilized by code, stack, or an earler mmap.
-    // -> It's natural in this `do_mmap() context` always to send a NULL, because the purpose of do_mmap() itself is "to allocate a page at the user adress."
-
-    bool page_alloc = vm_alloc_page_with_initializer(
-        VM_FILE, addr, page->writable, vm_initializer * init, void *aux);
-    if (!page_alloc) {
-        return NULL;
-    }
-
     return addr;
 }
 

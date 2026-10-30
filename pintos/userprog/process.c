@@ -1462,8 +1462,8 @@ static bool lazy_load_segment(struct page *page, void *aux)
  * Return true if successful, false if a memory allocation error
  * or disk read error occurs. */
 
-static void *set_load_info(struct file *file, off_t ofs, size_t page_read_bytes,
-                           size_t page_zero_bytes)
+void *set_load_info(struct file *file, off_t ofs, size_t page_read_bytes,
+                    size_t page_zero_bytes)
 {
     /* [SHW] lazy_load_segment에 인자로 넘겨줄 파일 정보*/
     struct load_info *load_info = malloc(sizeof(struct load_info));

@@ -28,5 +28,7 @@ struct file *process_get_file(
     int fd); /* 소유권을 넘기지 않고 현재 프로세스의 파일을 조회한다. */
 void process_close_file(
     int fd); /* 현재 프로세스의 해당 FD를 제거하고 파일과 기록을 해제한다. */
+void *set_load_info(struct file *file, off_t ofs, size_t page_read_bytes,
+                    size_t page_zero_bytes);
 
 #endif /* userprog/process.h */
