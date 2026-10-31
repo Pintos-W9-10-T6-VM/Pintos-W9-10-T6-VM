@@ -141,7 +141,7 @@ static bool set_zero_into_zero_bytes(struct page *page, off_t file_read_bytes,
 static bool load_file_page(struct page *page, void *aux)
 {
     bool result = true;
-    off_t file_read_bytes;
+    off_t file_read_bytes = 0;
 
     struct load_info *load_info = aux;
     file_page_init(page, load_info);
