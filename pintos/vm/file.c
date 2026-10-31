@@ -11,6 +11,7 @@
 #include "vm/vm.h"
 #include "userprog/syscall.h"
 #include "userprog/process.h"
+#include "string.h"
 
 static bool file_backed_swap_in(struct page *page, void *kva);
 static bool file_backed_swap_out(struct page *page);
@@ -106,6 +107,54 @@ static struct file *register_memory_mapped_file(struct file *file)
     return memory_mapped_file;
 }
 
+static void file_page_init(struct page *page, struct load_info *load_info)
+{
+    struct file_page *file_page = &page->file;
+
+    file_page->file = load_info->file;
+    file_page->offset = load_info->ofs;
+    file_page->file_read_bytes = load_info->read_bytes;
+}
+
+static void set_file_read_bytes(struct page *page, off_t file_read_bytes,
+                                struct load_info *load_info)
+{
+    lock_acquire(&filesys_lock);
+    file_read_bytes = file_read_at(load_info->file, page->frame->kva,
+                                   load_info->read_bytes, load_info->ofs);
+    lock_release(&filesys_lock);
+}
+
+static bool set_zero_into_zero_bytes(struct page *page, off_t file_read_bytes,
+                                     struct load_info *load_info)
+{
+    bool result;
+
+    result = (file_read_bytes == (off_t)load_info->read_bytes);
+    if (result) {
+        memset(page->frame->kva + load_info->read_bytes, 0,
+               load_info->zero_bytes);
+    }
+    return result;
+}
+
+static bool load_file_page(struct page *page, void *aux)
+{
+    bool result = true;
+    off_t file_read_bytes;
+
+    struct load_info *load_info = aux;
+    file_page_init(page, load_info);
+
+    set_file_read_bytes(page, file_read_bytes, load_info);
+    if (!set_zero_into_zero_bytes(page, file_read_bytes, load_info)) {
+        result = false;
+    }
+
+    free(load_info);
+    return result;
+}
+
 // When _find() failed, it means the `page adress` is already utilized by code, stack, or an earler mmap.
 // -> It's natural in this `do_mmap() context` always to send a NULL, because the purpose of do_mmap() itself is "to allocate a page at the user adress."
 void *do_mmap(void *addr, size_t length, int writable, struct file *file,
@@ -140,14 +189,14 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
             memory_mapped_file, offset, page_read_bytes, page_zero_bytes);
 
         if (!vm_alloc_page_with_initializer(VM_FILE, va, writable,
-                                            lazy_load_file, load_info)) {
+                                            load_file_page, load_info)) {
             free(load_info);
             return NULL;
         } // lazy_load_file() is not written. That's the point I start with tommorrow(10/31)
 
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
-        va += PGSIZE;
+        file_page->page_cnt++ va += PGSIZE;
         offset += page_read_bytes;
     }
     return addr;
