@@ -89,8 +89,8 @@ static bool is_page_range_unused(struct supplemental_page_table *spt,
 {
     /* [CJG] Check whether any page already registed in the range where we'll allocate. */
     for (void *va = addr; va < addr + length; va += PGSIZE) {
-        if (spt_find_page(spt, va) == NULL) {
-            return NULL;
+        if (spt_find_page(spt, va) != NULL) {
+            return false;
         }
     }
     return true;
@@ -116,13 +116,13 @@ static void file_page_init(struct page *page, struct load_info *load_info)
     file_page->file_read_bytes = load_info->read_bytes;
 }
 
-static void set_file_read_bytes(struct page *page, off_t file_read_bytes,
-                                struct load_info *load_info)
+static off_t read_file_page(struct page *page, struct load_info *load_info)
 {
     lock_acquire(&filesys_lock);
-    file_read_bytes = file_read_at(load_info->file, page->frame->kva,
-                                   load_info->read_bytes, load_info->ofs);
+    off_t file_read_bytes = file_read_at(load_info->file, page->frame->kva,
+                                         load_info->read_bytes, load_info->ofs);
     lock_release(&filesys_lock);
+    return file_read_bytes;
 }
 
 static bool set_zero_into_zero_bytes(struct page *page, off_t file_read_bytes,
@@ -141,18 +141,52 @@ static bool set_zero_into_zero_bytes(struct page *page, off_t file_read_bytes,
 static bool load_file_page(struct page *page, void *aux)
 {
     bool result = true;
-    off_t file_read_bytes = 0;
+    off_t file_read_bytes;
 
     struct load_info *load_info = aux;
     file_page_init(page, load_info);
 
-    set_file_read_bytes(page, file_read_bytes, load_info);
+    file_read_bytes = read_file_page(page, load_info);
     if (!set_zero_into_zero_bytes(page, file_read_bytes, load_info)) {
         result = false;
     }
 
     free(load_info);
     return result;
+}
+
+static bool file_page_alloc(void *addr, struct file *memory_mapped_file,
+                            size_t length, int writable, off_t offset)
+{
+    off_t bytes_after_offset = file_length(memory_mapped_file) - offset;
+    size_t read_bytes = (length < (size_t)bytes_after_offset)
+                            ? length
+                            : (size_t)bytes_after_offset;
+    size_t zero_bytes = ROUND_UP(length, PGSIZE) - read_bytes;
+    void *va = addr;
+
+    while (read_bytes > 0 || zero_bytes > 0) {
+        size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+        size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+        struct load_info *load_info = set_load_info(
+            memory_mapped_file, offset, page_read_bytes, page_zero_bytes);
+        if (load_info == NULL) {
+            return false;
+        }
+
+        if (!vm_alloc_page_with_initializer(VM_FILE, va, writable,
+                                            load_file_page, load_info)) {
+            free(load_info);
+            return false;
+        }
+
+        read_bytes -= page_read_bytes;
+        zero_bytes -= page_zero_bytes;
+        va += PGSIZE;
+        offset += page_read_bytes;
+    }
+    return true;
 }
 
 // When _find() failed, it means the `page adress` is already utilized by code, stack, or an earler mmap.
@@ -174,31 +208,10 @@ void *do_mmap(void *addr, size_t length, int writable, struct file *file,
         return NULL;
     }
 
-    off_t bytes_after_offset = file_length(memory_mapped_file) - offset;
-    size_t read_bytes = (length < (size_t)bytes_after_offset)
-                            ? length
-                            : (size_t)bytes_after_offset;
-    size_t zero_bytes = ROUND_UP(length, PGSIZE) - read_bytes;
-
-    void *va = addr;
-    while (read_bytes > 0 || zero_bytes > 0) {
-        size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-        size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
-        struct load_info *load_info = set_load_info(
-            memory_mapped_file, offset, page_read_bytes, page_zero_bytes);
-
-        if (!vm_alloc_page_with_initializer(VM_FILE, va, writable,
-                                            load_file_page, load_info)) {
-            free(load_info);
-            return NULL;
-        } // lazy_load_file() is not written. That's the point I start with tommorrow(10/31)
-
-        read_bytes -= page_read_bytes;
-        zero_bytes -= page_zero_bytes;
-        file_page->page_cnt++ va += PGSIZE;
-        offset += page_read_bytes;
+    if (!file_page_alloc(addr, memory_mapped_file, length, writable, offset)) {
+        return NULL;
     }
+
     return addr;
 }
 

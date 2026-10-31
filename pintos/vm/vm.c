@@ -333,6 +333,7 @@ static bool is_pml4_setable(struct page *page, struct frame *frame)
 
         return false;
     }
+    return true;
 }
 
 /* Claim the PAGE and set up the mmu. */
