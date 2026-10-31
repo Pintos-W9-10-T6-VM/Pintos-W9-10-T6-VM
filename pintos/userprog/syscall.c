@@ -12,6 +12,8 @@
 #include "threads/vaddr.h"    /* is_user_vaddr, PGSIZE */
 #include "threads/mmu.h"      /* pml4_get_page */
 #include "userprog/process.h" /* process_terminate */
+#include "lib/user/syscall.h"
+#include "vm/file.h"
 
 #include "threads/palloc.h"  /* 커널 명령어 페이지 할당과 해제를 사용한다. */
 #include "filesys/filesys.h" /* filesys_open 선언을 사용한다. */
@@ -439,8 +441,11 @@ void syscall_handler(struct intr_frame *f)
         break;
     case SYS_HALT: /* [YJH] 현재 프로세스가 아니라 시스템 전체 종료를 요청한 경우다. */
         power_off(); /* [YJH] process_terminate가 아니라 전원을 끈다. 종료 메시지 없이 반환하지 않는다. */
-    default:         /* 아직 지원하지 않는 번호를 요청한 경우다. */
-                     // thread_exit();
+    case SYS_MUNMAP: /* Remove a memory mapping. */
+        do_munmap((void *)f->R.rdi);
+        break;
+    default: /* 아직 지원하지 않는 번호를 요청한 경우다. */
+             // thread_exit();
         process_terminate(
             -1); /* 미지원 호출은 현재 프로세스의 비정상 종료로 처리한다. */
     }

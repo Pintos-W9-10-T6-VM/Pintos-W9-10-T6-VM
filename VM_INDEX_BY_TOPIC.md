@@ -2,23 +2,23 @@
 
 [사전순으로 보기](VM_INDEX_AZ.md)
 
-기준: 2026-10-26 · `YYJ` / `58e1dce` + 현재 작업 트리(번역 주석 포함).
+기준: 2026-10-29 · `YYJ` / `a392757` (pull 반영 코드).
 
-제공한 Project 3·Appendix 14개 문서의 코드 항목과 `vm1.png`, VM 구현에 필요한 보조 API를 수록했다. 총 **343개** 코드 항목.
+제공한 Project 3·Appendix 14개 문서의 코드 항목과 `vm1.png`, VM 구현에 필요한 보조 API와 팀 구현 항목을 수록했다. 총 **360개** 코드 항목.
 
-위치 표기는 `pintos/` 기준이다. 파일·줄 링크는 VS Code에서 열리며, `선언`은 헤더 링크다. 줄 번호는 코드 수정 시 갱신해야 한다.
+위치 표기는 `pintos/` 기준이며, 저장소 루트 파일은 별도 표시한다. 파일·줄 링크는 VS Code에서 열리며, `선언`은 헤더 링크다. 줄 번호는 코드 수정 시 갱신해야 한다.
 
-`구현됨`은 해당 본문이 작성됐다는 뜻이며 VM 전체 완성·테스트 PASS를 뜻하지 않는다. `부분 구현`은 연결·일부 처리만 존재, `미구현`은 핵심 동작 없음, `정의됨`은 타입·상수·멤버 등이 존재, `골격`은 빈 구조체다.
+`구현됨`은 해당 본문이 작성됐다는 뜻이며 VM 전체 완성·테스트 PASS를 뜻하지 않는다. `부분 구현`은 일부 동작·지원 상태·실패 정리가 미완성, `미구현`은 핵심 동작 없음, `정의됨`은 타입·상수·멤버 등이 존재, `골격`은 빈 구조체다.
 
 `코드 없음`은 문서 예시 또는 현재 저장소에 없는 API다. 예시는 함수 추가 지시가 아니다. **COW는 Extra, P4 표시는 이번 필수 범위 밖, inspect는 수정 금지**다.
 
-1. [SPT · Page](#topic-spt) (39)
-2. [UNINIT · ANON · Lazy](#topic-anon) (17)
+1. [SPT · Page](#topic-spt) (45)
+2. [UNINIT · ANON · Lazy](#topic-anon) (23)
 3. [Frame · Claim](#topic-frame) (6)
-4. [Fault · Stack](#topic-fault) (13)
+4. [Fault · Stack](#topic-fault) (14)
 5. [Swap · Disk](#topic-swap) (16)
 6. [FILE · mmap](#topic-file) (35)
-7. [Fork · 수명 · COW](#topic-lifecycle) (17)
+7. [Fork · 수명 · COW](#topic-lifecycle) (21)
 8. [PML4 · 주소](#topic-address) (52)
 9. [메모리 할당](#topic-allocation) (14)
 10. [Hash · Bitmap](#topic-hash) (55)
@@ -35,45 +35,51 @@
 
 | 이름 | 종류 | 한 줄 역할 | 위치 | 구현 상태 |
 |---|---|---|---|---|
-| `destroy` | 매크로 | 종류별 destroy 콜백 호출 | [include/vm/vm.h:110](pintos/include/vm/vm.h#L110) | 정의됨 |
+| `destroy` | 매크로 | 종류별 destroy 콜백 호출 | [include/vm/vm.h:117](pintos/include/vm/vm.h#L117) | 정의됨 |
 | `EFILESYS` | 빌드 플래그 | 확장 파일 시스템 분기 — P4 | [filesys/Make.vars:3](pintos/filesys/Make.vars#L3) | 정의됨 |
-| `struct page` | 구조체 | 가상 페이지의 공통 정보 | [include/vm/vm.h:59](pintos/include/vm/vm.h#L59) | 정의됨 |
-| `page.anon` | 멤버 | 익명 페이지의 union 데이터 | [include/vm/vm.h:77](pintos/include/vm/vm.h#L77) | 정의됨 |
-| `page.file` | 멤버 | 파일 페이지의 union 데이터 | [include/vm/vm.h:78](pintos/include/vm/vm.h#L78) | 정의됨 |
-| `page.frame` | 멤버 | 연결된 물리 프레임 | [include/vm/vm.h:63](pintos/include/vm/vm.h#L63) | 정의됨 |
-| `page.operations` | 멤버 | 종류별 연산 테이블 포인터 | [include/vm/vm.h:60](pintos/include/vm/vm.h#L60) | 정의됨 |
-| `page.page_cache` | 멤버 | 페이지 캐시 union 데이터 — P4 | [include/vm/vm.h:80](pintos/include/vm/vm.h#L80) | 정의됨 |
-| `page.uninit` | 멤버 | 미초기화 페이지의 union 데이터 | [include/vm/vm.h:76](pintos/include/vm/vm.h#L76) | 정의됨 |
-| `page.va` | 멤버 | 사용자 가상 페이지 주소 | [include/vm/vm.h:61](pintos/include/vm/vm.h#L61) | 정의됨 |
+| `hashing()` | 함수 | SPT의 페이지 번호를 해시값으로 변환 | [vm/vm.c:78](pintos/vm/vm.c#L78) | 구현됨 |
+| `less()` | 함수 | SPT 페이지의 va를 비교하는 콜백 | [vm/vm.c:69](pintos/vm/vm.c#L69) | 구현됨 |
+| `struct page` | 구조체 | 가상 페이지의 공통 정보 | [include/vm/vm.h:60](pintos/include/vm/vm.h#L60) | 정의됨 |
+| `page.anon` | 멤버 | 익명 페이지의 union 데이터 | [include/vm/vm.h:84](pintos/include/vm/vm.h#L84) | 정의됨 |
+| `page.file` | 멤버 | 파일 페이지의 union 데이터 | [include/vm/vm.h:85](pintos/include/vm/vm.h#L85) | 정의됨 |
+| `page.frame` | 멤버 | 연결된 물리 프레임 | [include/vm/vm.h:64](pintos/include/vm/vm.h#L64) | 정의됨 |
+| `page.is_stack` | 멤버 | 스택 페이지 표시; VM_MARKER_0에서 설정 | [include/vm/vm.h:73](pintos/include/vm/vm.h#L73) | 정의됨 |
+| `page.operations` | 멤버 | 종류별 연산 테이블 포인터 | [include/vm/vm.h:61](pintos/include/vm/vm.h#L61) | 정의됨 |
+| `page.page_cache` | 멤버 | 페이지 캐시 union 데이터 — P4 | [include/vm/vm.h:87](pintos/include/vm/vm.h#L87) | 정의됨 |
+| `page.spt_elem` | 멤버 | page를 SPT 해시에 연결하는 요소 | [include/vm/vm.h:75](pintos/include/vm/vm.h#L75) | 정의됨 |
+| `page.uninit` | 멤버 | 미초기화 페이지의 union 데이터 | [include/vm/vm.h:83](pintos/include/vm/vm.h#L83) | 정의됨 |
+| `page.va` | 멤버 | 사용자 가상 페이지 주소 | [include/vm/vm.h:62](pintos/include/vm/vm.h#L62) | 정의됨 |
+| `page.writable` | 멤버 | 사용자 페이지의 쓰기 허용 여부 | [include/vm/vm.h:71](pintos/include/vm/vm.h#L71) | 정의됨 |
 | `struct page_cache` | 구조체 | 페이지 캐시 메타데이터 — P4 | [include/filesys/page_cache.h:8](pintos/include/filesys/page_cache.h#L8) | **골격** |
-| `page_get_type()` | 함수 | 초기화 후의 실제 페이지 종류 조회 | [vm/vm.c:33](pintos/vm/vm.c#L33) · [선언](pintos/include/vm/vm.h#L145) | 구현됨 |
-| `struct page_operations` | 구조체 | 페이지 종류별 연산 인터페이스 | [include/vm/vm.h:101](pintos/include/vm/vm.h#L101) | 정의됨 |
-| `page_operations.destroy` | 함수 포인터 | 종류별 자원을 정리하는 콜백 | [include/vm/vm.h:104](pintos/include/vm/vm.h#L104) | 정의됨 |
-| `page_operations.swap_in` | 함수 포인터 | 내용을 프레임으로 가져오는 콜백 | [include/vm/vm.h:102](pintos/include/vm/vm.h#L102) | 정의됨 |
-| `page_operations.swap_out` | 함수 포인터 | 페이지를 내보내는 콜백 | [include/vm/vm.h:103](pintos/include/vm/vm.h#L103) | 정의됨 |
-| `page_operations.type` | 멤버 | 연산 테이블의 페이지 종류 | [include/vm/vm.h:105](pintos/include/vm/vm.h#L105) | 정의됨 |
-| `spt_find_page()` | 함수 | 가상 주소로 SPT 페이지 검색 | [vm/vm.c:87](pintos/vm/vm.c#L87) · [선언](pintos/include/vm/vm.h#L130) | **미구현** |
-| `spt_insert_page()` | 함수 | 주소 중복을 검사하고 페이지 등록 | [vm/vm.c:102](pintos/vm/vm.c#L102) · [선언](pintos/include/vm/vm.h#L131) | **미구현** |
-| `spt_remove_page()` | 함수 | SPT 등록 제거와 페이지 정리 | [vm/vm.c:116](pintos/vm/vm.c#L116) · [선언](pintos/include/vm/vm.h#L132) | **부분 구현** |
-| `struct supplemental_page_table` | 구조체 | 프로세스별 페이지 검색 테이블 | [include/vm/vm.h:122](pintos/include/vm/vm.h#L122) | **골격** |
-| `supplemental_page_table_copy()` | 함수 | fork용 SPT 복제 | [vm/vm.c:257](pintos/vm/vm.c#L257) · [선언](pintos/include/vm/vm.h#L127) | **미구현** |
-| `supplemental_page_table_init()` | 함수 | 빈 SPT 초기화 | [vm/vm.c:241](pintos/vm/vm.c#L241) · [선언](pintos/include/vm/vm.h#L126) | **미구현** |
-| `supplemental_page_table_kill()` | 함수 | SPT 전체 페이지와 자원 정리 | [vm/vm.c:264](pintos/vm/vm.c#L264) · [선언](pintos/include/vm/vm.h#L129) | **미구현** |
-| `swap_in` | 매크로 | 종류별 swap_in 콜백 호출 | [include/vm/vm.h:108](pintos/include/vm/vm.h#L108) | 정의됨 |
-| `swap_out` | 매크로 | 종류별 swap_out 콜백 호출 | [include/vm/vm.h:109](pintos/include/vm/vm.h#L109) | 정의됨 |
+| `page_get_type()` | 함수 | 초기화 후의 실제 페이지 종류 조회 | [vm/vm.c:52](pintos/vm/vm.c#L52) · [선언](pintos/include/vm/vm.h#L153) | 구현됨 |
+| `struct page_operations` | 구조체 | 페이지 종류별 연산 인터페이스 | [include/vm/vm.h:108](pintos/include/vm/vm.h#L108) | 정의됨 |
+| `page_operations.destroy` | 함수 포인터 | 종류별 자원을 정리하는 콜백 | [include/vm/vm.h:111](pintos/include/vm/vm.h#L111) | 정의됨 |
+| `page_operations.swap_in` | 함수 포인터 | 내용을 프레임으로 가져오는 콜백 | [include/vm/vm.h:109](pintos/include/vm/vm.h#L109) | 정의됨 |
+| `page_operations.swap_out` | 함수 포인터 | 페이지를 내보내는 콜백 | [include/vm/vm.h:110](pintos/include/vm/vm.h#L110) | 정의됨 |
+| `page_operations.type` | 멤버 | 연산 테이블의 페이지 종류 | [include/vm/vm.h:112](pintos/include/vm/vm.h#L112) | 정의됨 |
+| `spt_find_page()` | 함수 | 페이지 시작 주소로 정렬한 뒤 해시 검색 | [vm/vm.c:164](pintos/vm/vm.c#L164) · [선언](pintos/include/vm/vm.h#L138) | 구현됨 |
+| `spt_insert_page()` | 함수 | 해시에 페이지 등록; 주소 중복 시 실패 | [vm/vm.c:178](pintos/vm/vm.c#L178) · [선언](pintos/include/vm/vm.h#L139) | 구현됨 |
+| `spt_remove_page()` | 함수 | page 해제 호출만 존재; 해시 등록 제거 없음 | [vm/vm.c:185](pintos/vm/vm.c#L185) · [선언](pintos/include/vm/vm.h#L140) | **부분 구현** |
+| `struct supplemental_page_table` | 구조체 | 프로세스별 페이지 해시 테이블 | [include/vm/vm.h:129](pintos/include/vm/vm.h#L129) | 정의됨 |
+| `supplemental_page_table.pages` | 멤버 | 사용자 페이지 주소를 키로 관리하는 해시 | [include/vm/vm.h:130](pintos/include/vm/vm.h#L130) | 정의됨 |
+| `supplemental_page_table_copy()` | 함수 | UNINIT·ANON 복제; FILE·swap 상태 미지원 | [vm/vm.c:404](pintos/vm/vm.c#L404) · [선언](pintos/include/vm/vm.h#L135) | **부분 구현** |
+| `supplemental_page_table_init()` | 함수 | 해시 SPT 초기화; 성공 여부를 bool로 반환 | [vm/vm.c:356](pintos/vm/vm.c#L356) · [선언](pintos/include/vm/vm.h#L134) | 구현됨 |
+| `supplemental_page_table_kill()` | 함수 | 해시 파괴·buckets 초기화; 종류별 정리 미완성 | [vm/vm.c:435](pintos/vm/vm.c#L435) · [선언](pintos/include/vm/vm.h#L137) | **부분 구현** |
+| `swap_in` | 매크로 | 종류별 swap_in 콜백 호출 | [include/vm/vm.h:115](pintos/include/vm/vm.h#L115) | 정의됨 |
+| `swap_out` | 매크로 | 종류별 swap_out 콜백 호출 | [include/vm/vm.h:116](pintos/include/vm/vm.h#L116) | 정의됨 |
 | `VM` | 빌드 플래그 | Project 3 VM 분기 활성화 | [vm/Make.vars:3](pintos/vm/Make.vars#L3) | 정의됨 |
-| `vm_alloc_page` | 매크로 | 별도 적재 콜백 없이 페이지 등록 요청 | [include/vm/vm.h:138](pintos/include/vm/vm.h#L138) | 정의됨 |
-| `VM_ANON` | 열거값 | 익명 페이지 종류 | [include/vm/vm.h:12](pintos/include/vm/vm.h#L12) | 정의됨 |
-| `vm_dealloc_page()` | 함수 | 종류별 정리 후 page 객체 해제; 수정 금지 | [vm/vm.c:202](pintos/vm/vm.c#L202) · [선언](pintos/include/vm/vm.h#L143) | 구현됨 |
-| `VM_FILE` | 열거값 | 파일 기반 페이지 종류 | [include/vm/vm.h:15](pintos/include/vm/vm.h#L15) | 정의됨 |
-| `vm_init()` | 함수 | VM 하위 시스템과 검사 인터럽트 초기화 | [vm/vm.c:11](pintos/vm/vm.c#L11) · [선언](pintos/include/vm/vm.h#L134) | **부분 구현** |
-| `VM_MARKER_0` | 열거값 | 추가 상태 표시 비트; 스택 표시에 활용 | [include/vm/vm.h:29](pintos/include/vm/vm.h#L29) | 정의됨 |
-| `VM_MARKER_1` | 열거값 | 추가 상태 표시 비트 | [include/vm/vm.h:30](pintos/include/vm/vm.h#L30) | 정의됨 |
-| `VM_MARKER_END` | 열거값 | 보조 플래그 값의 상한 | [include/vm/vm.h:34](pintos/include/vm/vm.h#L34) | 정의됨 |
-| `VM_PAGE_CACHE` | 열거값 | 페이지 캐시 종류 — P4 | [include/vm/vm.h:18](pintos/include/vm/vm.h#L18) | 정의됨 |
-| `enum vm_type` | enum | 페이지 종류와 보조 플래그 | [include/vm/vm.h:6](pintos/include/vm/vm.h#L6) | 정의됨 |
-| `VM_TYPE` | 매크로 | 보조 플래그를 제외한 페이지 종류 | [include/vm/vm.h:47](pintos/include/vm/vm.h#L47) | 정의됨 |
-| `VM_UNINIT` | 열거값 | 첫 접근 전 미초기화 상태 | [include/vm/vm.h:9](pintos/include/vm/vm.h#L9) | 정의됨 |
+| `vm_alloc_page` | 매크로 | 별도 적재 콜백 없이 페이지 등록 요청 | [include/vm/vm.h:146](pintos/include/vm/vm.h#L146) | 정의됨 |
+| `VM_ANON` | 열거값 | 익명 페이지 종류 | [include/vm/vm.h:13](pintos/include/vm/vm.h#L13) | 정의됨 |
+| `vm_dealloc_page()` | 함수 | 종류별 정리 후 page 객체 해제; 수정 금지 | [vm/vm.c:307](pintos/vm/vm.c#L307) · [선언](pintos/include/vm/vm.h#L151) | 구현됨 |
+| `VM_FILE` | 열거값 | 파일 기반 페이지 종류 | [include/vm/vm.h:16](pintos/include/vm/vm.h#L16) | 정의됨 |
+| `vm_init()` | 함수 | VM 하위 시스템과 검사 인터럽트 초기화 | [vm/vm.c:30](pintos/vm/vm.c#L30) · [선언](pintos/include/vm/vm.h#L142) | **부분 구현** |
+| `VM_MARKER_0` | 열거값 | 추가 상태 표시 비트; 스택 표시에 활용 | [include/vm/vm.h:30](pintos/include/vm/vm.h#L30) | 정의됨 |
+| `VM_MARKER_1` | 열거값 | 추가 상태 표시 비트 | [include/vm/vm.h:31](pintos/include/vm/vm.h#L31) | 정의됨 |
+| `VM_MARKER_END` | 열거값 | 보조 플래그 값의 상한 | [include/vm/vm.h:35](pintos/include/vm/vm.h#L35) | 정의됨 |
+| `VM_PAGE_CACHE` | 열거값 | 페이지 캐시 종류 — P4 | [include/vm/vm.h:19](pintos/include/vm/vm.h#L19) | 정의됨 |
+| `enum vm_type` | enum | 페이지 종류와 보조 플래그 | [include/vm/vm.h:7](pintos/include/vm/vm.h#L7) | 정의됨 |
+| `VM_TYPE` | 매크로 | 보조 플래그를 제외한 페이지 종류 | [include/vm/vm.h:48](pintos/include/vm/vm.h#L48) | 정의됨 |
+| `VM_UNINIT` | 열거값 | 첫 접근 전 미초기화 상태 | [include/vm/vm.h:10](pintos/include/vm/vm.h#L10) | 정의됨 |
 
 <a id="topic-anon"></a>
 
@@ -83,22 +89,28 @@
 
 | 이름 | 종류 | 한 줄 역할 | 위치 | 구현 상태 |
 |---|---|---|---|---|
-| `anon_destroy()` | 함수 | 익명 프레임·스왑 자원 정리 | [vm/anon.c:59](pintos/vm/anon.c#L59) | **미구현** |
-| `anon_initializer()` | 함수 | 익명 페이지로 전환하고 상태 초기화 | [vm/anon.c:34](pintos/vm/anon.c#L34) · [선언](pintos/include/vm/anon.h#L11) | **부분 구현** |
-| `anon_ops` | 연산 테이블 | 익명 페이지의 연산 연결; 수정 금지 | [vm/anon.c:16](pintos/vm/anon.c#L16) | 정의됨 |
+| `anon_destroy()` | 함수 | 익명 프레임·스왑 자원 정리 | [vm/anon.c:68](pintos/vm/anon.c#L68) | **미구현** |
+| `anon_initializer()` | 함수 | ANON 타입 검사·연산 테이블 전환; swap 상태 미구현 | [vm/anon.c:35](pintos/vm/anon.c#L35) · [선언](pintos/include/vm/anon.h#L11) | **부분 구현** |
+| `anon_ops` | 연산 테이블 | 익명 페이지의 연산 연결; 수정 금지 | [vm/anon.c:17](pintos/vm/anon.c#L17) | 정의됨 |
 | `struct anon_page` | 구조체 | 익명 페이지의 종류별 메타데이터 | [include/vm/anon.h:7](pintos/include/vm/anon.h#L7) | **골격** |
-| `lazy_load_segment()` | 함수 | 첫 접근 때 ELF 파일 내용 적재 | [userprog/process.c:1436](pintos/userprog/process.c#L1436) | **미구현** |
-| `load_segment()` (VM) | 함수 | ELF 세그먼트의 lazy 페이지 등록 | [userprog/process.c:1457](pintos/userprog/process.c#L1457) | **부분 구현** |
-| `uninit_destroy()` | 함수 | 미접근 UNINIT의 보유 자원 정리 | [vm/uninit.c:80](pintos/vm/uninit.c#L80) | **미구현** |
-| `uninit_initialize()` | 함수 | 종류 전환 후 내용 적재 콜백 호출 | [vm/uninit.c:56](pintos/vm/uninit.c#L56) | 구현됨 |
-| `uninit_new()` | 함수 | UNINIT 객체와 초기화 콜백 설정; 수정 금지 | [vm/uninit.c:36](pintos/vm/uninit.c#L36) · [선언](pintos/include/vm/uninit.h#L24) | 구현됨 |
-| `uninit_ops` | 연산 테이블 | UNINIT의 적재·파괴 연산 연결; 수정 금지 | [vm/uninit.c:27](pintos/vm/uninit.c#L27) | 정의됨 |
+| `lazy_load_segment()` | 함수 | 파일 읽기·나머지 0 채움·load_info 해제 | [userprog/process.c:1428](pintos/userprog/process.c#L1428) | 구현됨 |
+| `struct load_info` | 구조체 | 실행 파일 지연 적재·UNINIT 복제용 정보 | [include/userprog/process.h:10](pintos/include/userprog/process.h#L10) | 정의됨 |
+| `load_info.file` | 멤버 | 내용을 읽어 올 실행 파일 포인터 | [include/userprog/process.h:11](pintos/include/userprog/process.h#L11) | 정의됨 |
+| `load_info.ofs` | 멤버 | 실행 파일에서 읽기 시작할 위치 | [include/userprog/process.h:12](pintos/include/userprog/process.h#L12) | 정의됨 |
+| `load_info.read_bytes` | 멤버 | 해당 페이지에 파일에서 읽을 바이트 수 | [include/userprog/process.h:13](pintos/include/userprog/process.h#L13) | 정의됨 |
+| `load_info.zero_bytes` | 멤버 | 파일 내용 뒤에 0으로 채울 바이트 수 | [include/userprog/process.h:14](pintos/include/userprog/process.h#L14) | 정의됨 |
+| `load_segment()` (VM) | 함수 | 페이지별 load_info 생성·lazy 콜백과 SPT 등록 | [userprog/process.c:1464](pintos/userprog/process.c#L1464) | 구현됨 |
+| `memset()` | 함수 | 페이지의 남은 영역 등을 지정 바이트로 채움 | [lib/string.c:279](pintos/lib/string.c#L279) · [선언](pintos/include/lib/string.h#L19) | 구현됨 |
+| `uninit_destroy()` | 함수 | 미적재 페이지의 aux 해제 | [vm/uninit.c:83](pintos/vm/uninit.c#L83) | 구현됨 |
+| `uninit_initialize()` | 함수 | 종류 전환 후 내용 적재 콜백 호출 | [vm/uninit.c:59](pintos/vm/uninit.c#L59) | 구현됨 |
+| `uninit_new()` | 함수 | UNINIT 객체와 초기화 콜백 설정; 수정 금지 | [vm/uninit.c:39](pintos/vm/uninit.c#L39) · [선언](pintos/include/vm/uninit.h#L24) | 구현됨 |
+| `uninit_ops` | 연산 테이블 | UNINIT의 적재·파괴 연산 연결; 수정 금지 | [vm/uninit.c:30](pintos/vm/uninit.c#L30) | 정의됨 |
 | `struct uninit_page` | 구조체 | 첫 접근 때 사용할 초기화 정보 | [include/vm/uninit.h:13](pintos/include/vm/uninit.h#L13) | 정의됨 |
 | `uninit_page.aux` | 멤버 | 적재 콜백에 전달할 부가 정보 | [include/vm/uninit.h:18](pintos/include/vm/uninit.h#L18) | 정의됨 |
 | `uninit_page.init` | 함수 포인터 | 실행 파일 등 내용을 채우는 콜백 | [include/vm/uninit.h:16](pintos/include/vm/uninit.h#L16) | 정의됨 |
 | `uninit_page.page_initializer` | 함수 포인터 | ANON·FILE로 전환하는 콜백 | [include/vm/uninit.h:21](pintos/include/vm/uninit.h#L21) | 정의됨 |
 | `uninit_page.type` | 멤버 | 초기화 이후 사용할 페이지 종류 | [include/vm/uninit.h:17](pintos/include/vm/uninit.h#L17) | 정의됨 |
-| `vm_alloc_page_with_initializer()` | 함수 | 초기화 정보를 가진 페이지 등록 | [vm/vm.c:57](pintos/vm/vm.c#L57) · [선언](pintos/include/vm/vm.h#L140) | **미구현** |
+| `vm_alloc_page_with_initializer()` | 함수 | 타입별 초기화 선택·권한/스택 표시·UNINIT 등록 | [vm/vm.c:103](pintos/vm/vm.c#L103) · [선언](pintos/include/vm/vm.h#L148) | 구현됨 |
 | `vm_initializer` | typedef | 페이지 내용 적재 콜백의 함수 타입 | [include/vm/uninit.h:8](pintos/include/vm/uninit.h#L8) | 정의됨 |
 
 <a id="topic-frame"></a>
@@ -109,12 +121,12 @@
 
 | 이름 | 종류 | 한 줄 역할 | 위치 | 구현 상태 |
 |---|---|---|---|---|
-| `struct frame` | 구조체 | 물리 프레임과 연결된 page 정보 | [include/vm/vm.h:87](pintos/include/vm/vm.h#L87) | 정의됨 |
-| `frame.kva` | 멤버 | 프레임에 접근할 커널 가상 주소 | [include/vm/vm.h:88](pintos/include/vm/vm.h#L88) | 정의됨 |
-| `frame.page` | 멤버 | 프레임에 연결된 가상 페이지 | [include/vm/vm.h:89](pintos/include/vm/vm.h#L89) | 정의됨 |
-| `vm_claim_page()` | 함수 | VA를 SPT에서 찾아 실제 메모리 확보 | [vm/vm.c:210](pintos/vm/vm.c#L210) · [선언](pintos/include/vm/vm.h#L144) | **부분 구현** |
-| `vm_do_claim_page()` | 함수 | 프레임 연결·PML4 매핑·내용 적재 | [vm/vm.c:221](pintos/vm/vm.c#L221) | **부분 구현** |
-| `vm_get_frame()` | 함수 | 사용자 풀에서 프레임 확보 | [vm/vm.c:157](pintos/vm/vm.c#L157) | **미구현** |
+| `struct frame` | 구조체 | 물리 프레임과 연결된 page 정보 | [include/vm/vm.h:94](pintos/include/vm/vm.h#L94) | 정의됨 |
+| `frame.kva` | 멤버 | 프레임에 접근할 커널 가상 주소 | [include/vm/vm.h:95](pintos/include/vm/vm.h#L95) | 정의됨 |
+| `frame.page` | 멤버 | 프레임에 연결된 가상 페이지 | [include/vm/vm.h:96](pintos/include/vm/vm.h#L96) | 정의됨 |
+| `vm_claim_page()` | 함수 | VA로 SPT 조회 후 claim; 없으면 false | [vm/vm.c:315](pintos/vm/vm.c#L315) · [선언](pintos/include/vm/vm.h#L152) | 구현됨 |
+| `vm_do_claim_page()` | 함수 | 권한별 PML4 매핑·적재; 적재 실패 복구 미완성 | [vm/vm.c:330](pintos/vm/vm.c#L330) | **부분 구현** |
+| `vm_get_frame()` | 함수 | user pool 프레임 확보; 부족 시 퇴거 대신 PANIC | [vm/vm.c:225](pintos/vm/vm.c#L225) | **부분 구현** |
 
 <a id="topic-fault"></a>
 
@@ -133,10 +145,11 @@
 | `PF_P` | 매크로 | 보호 위반인지 구분하는 비트 | [include/userprog/exception.h:5](pintos/include/userprog/exception.h#L5) | 정의됨 |
 | `PF_U` | 매크로 | 사용자 모드 접근인지 구분하는 비트 | [include/userprog/exception.h:7](pintos/include/userprog/exception.h#L7) | 정의됨 |
 | `PF_W` | 매크로 | 쓰기 접근인지 구분하는 비트 | [include/userprog/exception.h:6](pintos/include/userprog/exception.h#L6) | 정의됨 |
-| `setup_stack()` (VM) | 함수 | 최초 스택 페이지 등록·즉시 claim | [userprog/process.c:1488](pintos/userprog/process.c#L1488) | **미구현** |
+| `setup_stack()` (VM) | 함수 | 스택 표시 페이지 등록·즉시 claim·RSP 설정 | [userprog/process.c:1508](pintos/userprog/process.c#L1508) | 구현됨 |
+| `thread.syscall_prev_rsp` | 멤버 | 시스템 콜 진입 시 저장한 사용자 RSP | [include/threads/thread.h:147](pintos/include/threads/thread.h#L147) | 정의됨 |
 | `USER_STACK` | 매크로 | 사용자 스택의 상단 주소 | [include/threads/vaddr.h:38](pintos/include/threads/vaddr.h#L38) | 정의됨 |
-| `vm_stack_growth()` | 함수 | 필요한 익명 스택 페이지 확장 | [vm/vm.c:170](pintos/vm/vm.c#L170) | **미구현** |
-| `vm_try_handle_fault()` | 함수 | 주소·권한·스택 증가 판단 | [vm/vm.c:182](pintos/vm/vm.c#L182) · [선언](pintos/include/vm/vm.h#L135) | **부분 구현** |
+| `vm_stack_growth()` | 함수 | 정렬한 주소에 스택 등록·claim; 등록 결과 미검사 | [vm/vm.c:247](pintos/vm/vm.c#L247) | **부분 구현** |
+| `vm_try_handle_fault()` | 함수 | SPT 조회·스택 확장 판단; 쓰기 인자 미사용 | [vm/vm.c:263](pintos/vm/vm.c#L263) · [선언](pintos/include/vm/vm.h#L143) | **부분 구현** |
 
 <a id="topic-swap"></a>
 
@@ -146,8 +159,8 @@
 
 | 이름 | 종류 | 한 줄 역할 | 위치 | 구현 상태 |
 |---|---|---|---|---|
-| `anon_swap_in()` | 함수 | 스왑 슬롯에서 익명 페이지 복원 | [vm/anon.c:45](pintos/vm/anon.c#L45) | **미구현** |
-| `anon_swap_out()` | 함수 | 익명 페이지를 스왑 슬롯에 보존 | [vm/anon.c:52](pintos/vm/anon.c#L52) | **미구현** |
+| `anon_swap_in()` | 함수 | 스왑 슬롯에서 익명 페이지 복원 | [vm/anon.c:54](pintos/vm/anon.c#L54) | **미구현** |
+| `anon_swap_out()` | 함수 | 익명 페이지를 스왑 슬롯에 보존 | [vm/anon.c:61](pintos/vm/anon.c#L61) | **미구현** |
 | `struct disk` | 구조체 | ATA 디스크의 장치·용량·통계 | [devices/disk.c:91](pintos/devices/disk.c#L91) | 정의됨 |
 | `disk_get()` | 함수 | 채널·장치 번호로 디스크 조회 | [devices/disk.c:269](pintos/devices/disk.c#L269) · [선언](pintos/include/devices/disk.h#L30) | 구현됨 |
 | `disk_init()` | 함수 | 디스크 탐지와 초기화 | [devices/disk.c:162](pintos/devices/disk.c#L162) · [선언](pintos/include/devices/disk.h#L27) | 구현됨 |
@@ -158,10 +171,10 @@
 | `disk_size()` | 함수 | 전체 섹터 수 조회 | [devices/disk.c:285](pintos/devices/disk.c#L285) · [선언](pintos/include/devices/disk.h#L31) | 구현됨 |
 | `disk_write()` | 함수 | 디스크 섹터 하나 쓰기 | [devices/disk.c:332](pintos/devices/disk.c#L332) · [선언](pintos/include/devices/disk.h#L33) | 구현됨 |
 | `PRDSNu` | 매크로 | 섹터 번호용 printf 형식 지정자 | [include/devices/disk.h:25](pintos/include/devices/disk.h#L25) | 정의됨 |
-| `swap_disk` | 전역 변수 | 스왑 장치 포인터; 현재 NULL 설정 | [vm/anon.c:9](pintos/vm/anon.c#L9) | 정의됨 |
-| `vm_anon_init()` | 함수 | 익명 페이지용 스왑 장치 준비 | [vm/anon.c:25](pintos/vm/anon.c#L25) · [선언](pintos/include/vm/anon.h#L10) | **미구현** |
-| `vm_evict_frame()` | 함수 | 페이지 퇴거 후 프레임 재사용 | [vm/vm.c:139](pintos/vm/vm.c#L139) | **미구현** |
-| `vm_get_victim()` | 함수 | 퇴거할 프레임 선택 | [vm/vm.c:124](pintos/vm/vm.c#L124) | **미구현** |
+| `swap_disk` | 전역 변수 | 스왑 장치 포인터; 현재 NULL 설정 | [vm/anon.c:10](pintos/vm/anon.c#L10) | 정의됨 |
+| `vm_anon_init()` | 함수 | 익명 페이지용 스왑 장치 준비 | [vm/anon.c:26](pintos/vm/anon.c#L26) · [선언](pintos/include/vm/anon.h#L10) | **미구현** |
+| `vm_evict_frame()` | 함수 | 페이지 퇴거 후 프레임 재사용 | [vm/vm.c:207](pintos/vm/vm.c#L207) | **미구현** |
+| `vm_get_victim()` | 함수 | 퇴거할 프레임 선택 | [vm/vm.c:192](pintos/vm/vm.c#L192) | **미구현** |
 
 <a id="topic-file"></a>
 
@@ -193,7 +206,7 @@
 | `file_write()` | 함수 | 현재 파일 위치에 쓰기 | [filesys/file.c:97](pintos/filesys/file.c#L97) · [선언](pintos/include/filesys/file.h#L18) | 구현됨 |
 | `file_write_at()` | 함수 | 지정 오프셋에 쓰기 | [filesys/file.c:111](pintos/filesys/file.c#L111) · [선언](pintos/include/filesys/file.h#L19) | 구현됨 |
 | `filesize()` (사용자) | 함수 | 파일 크기 조회 요청 | [lib/user/syscall.c:100](pintos/lib/user/syscall.c#L100) · [선언](pintos/include/lib/user/syscall.h#L32) | 구현됨 |
-| `filesys_lock` | 전역 변수 | 로더·파일 시스템의 공통 접근 락 | [userprog/syscall.c:24](pintos/userprog/syscall.c#L24) | 정의됨 |
+| `filesys_lock` | 전역 변수 | 로더·파일 시스템의 공통 접근 락 | [userprog/syscall.c:25](pintos/userprog/syscall.c#L25) | 정의됨 |
 | `main()` (mmap 예제) | 예시 함수 | 파일을 mmap해 출력하는 명세 예제 | [명세 예시](https://casys-kaist.github.io/pintos-kaist/project3/introduction.html) | 코드 없음 |
 | `mmap()` (사용자) | 함수 | 사용자 매핑 요청; 커널 분기 없음 | [lib/user/syscall.c:135](pintos/lib/user/syscall.c#L135) · [선언](pintos/include/lib/user/syscall.h#L42) | **부분 구현** |
 | `munmap()` (사용자) | 함수 | 사용자 해제 요청; 커널 분기 없음 | [lib/user/syscall.c:140](pintos/lib/user/syscall.c#L140) · [선언](pintos/include/lib/user/syscall.h#L43) | **부분 구현** |
@@ -215,22 +228,26 @@
 
 | 이름 | 종류 | 한 줄 역할 | 위치 | 구현 상태 |
 |---|---|---|---|---|
-| `__do_fork()` | 함수 | 자식 실행 문맥·주소 공간·FD 복제 | [userprog/process.c:335](pintos/userprog/process.c#L335) | **부분 구현** |
+| `__do_fork()` | 함수 | 자식 실행 문맥·주소 공간·FD 복제 | [userprog/process.c:340](pintos/userprog/process.c#L340) | **부분 구현** |
+| `anon_page_copy()` | 함수 | 상주 ANON 프레임을 자식에 복사; swap 미지원 | [vm/vm.c:388](pintos/vm/vm.c#L388) | **부분 구현** |
+| `destructor()` | 함수 | SPT 삭제 콜백; 종류별 자원 정리 미완성 | [vm/vm.c:88](pintos/vm/vm.c#L88) | **부분 구현** |
 | `exec()` (사용자) | 함수 | 사용자 exec 요청 래퍼 | [lib/user/syscall.c:75](pintos/lib/user/syscall.c#L75) · [선언](pintos/include/lib/user/syscall.h#L27) | 구현됨 |
 | `exit()` (사용자) | 함수 | 사용자 종료 요청 래퍼 | [lib/user/syscall.c:64](pintos/lib/user/syscall.c#L64) · [선언](pintos/include/lib/user/syscall.h#L25) | 구현됨 |
 | `fork()` (사용자) | 함수 | 사용자 fork 요청 래퍼 | [lib/user/syscall.c:70](pintos/lib/user/syscall.c#L70) · [선언](pintos/include/lib/user/syscall.h#L26) | 구현됨 |
-| `initd()` | 함수 | 최초 실행 정보 인수와 프로그램 실행 | [userprog/process.c:180](pintos/userprog/process.c#L180) | **부분 구현** |
-| `process_activate()` | 함수 | 프로세스 PML4와 커널 스택 활성화 | [userprog/process.c:965](pintos/userprog/process.c#L965) · [선언](pintos/include/userprog/process.h#L11) | 구현됨 |
-| `process_cleanup()` | 함수 | SPT·실행 파일·PML4 정리 | [userprog/process.c:925](pintos/userprog/process.c#L925) | **부분 구현** |
-| `process_create_initd()` | 함수 | 최초 사용자 프로세스 생성 | [userprog/process.c:93](pintos/userprog/process.c#L93) · [선언](pintos/include/userprog/process.h#L6) | 구현됨 |
-| `process_exec()` | 함수 | 기존 프로그램 이미지를 새 ELF로 교체 | [userprog/process.c:433](pintos/userprog/process.c#L433) · [선언](pintos/include/userprog/process.h#L8) | **부분 구현** |
-| `process_exit()` | 함수 | FD·자식 기록·주소 공간 종료 정리 | [userprog/process.c:568](pintos/userprog/process.c#L568) · [선언](pintos/include/userprog/process.h#L10) | **부분 구현** |
-| `process_fork()` | 함수 | 자식 생성 후 복제 결과 대기 | [userprog/process.c:212](pintos/userprog/process.c#L212) · [선언](pintos/include/userprog/process.h#L7) | **부분 구현** |
-| `process_init()` | 함수 | 새 주소 공간용 초기화 연결 | [userprog/process.c:83](pintos/userprog/process.c#L83) | **미구현** |
-| `process_terminate()` | 함수 | 종료값 저장 후 스레드 종료 | [userprog/process.c:647](pintos/userprog/process.c#L647) · [선언](pintos/include/userprog/process.h#L12) | 구현됨 |
-| `process_wait()` | 함수 | 직접 자식의 종료 결과 한 번 대기 | [userprog/process.c:530](pintos/userprog/process.c#L530) · [선언](pintos/include/userprog/process.h#L9) | 구현됨 |
-| `syscall_handler()` | 함수 | 요청 분기; mmap·munmap 분기 미연결 | [userprog/syscall.c:362](pintos/userprog/syscall.c#L362) | **부분 구현** |
-| `vm_handle_wp()` | 함수 | 쓰기 보호 폴트 처리 — COW Extra | [vm/vm.c:176](pintos/vm/vm.c#L176) | **미구현** |
+| `initd()` | 함수 | 최초 실행 정보 인수와 프로그램 실행 | [userprog/process.c:183](pintos/userprog/process.c#L183) | **부분 구현** |
+| `memcpy()` | 함수 | aux·프레임의 지정 바이트 수 복사 | [lib/string.c:6](pintos/lib/string.c#L6) · [선언](pintos/include/lib/string.h#L7) | 구현됨 |
+| `process_activate()` | 함수 | 프로세스 PML4와 커널 스택 활성화 | [userprog/process.c:957](pintos/userprog/process.c#L957) · [선언](pintos/include/userprog/process.h#L22) | 구현됨 |
+| `process_cleanup()` | 함수 | SPT·실행 파일·PML4 정리 | [userprog/process.c:917](pintos/userprog/process.c#L917) | **부분 구현** |
+| `process_create_initd()` | 함수 | 최초 사용자 프로세스 생성 | [userprog/process.c:96](pintos/userprog/process.c#L96) · [선언](pintos/include/userprog/process.h#L17) | 구현됨 |
+| `process_exec()` | 함수 | 기존 이미지 정리·SPT 재초기화·새 ELF 적재 | [userprog/process.c:441](pintos/userprog/process.c#L441) · [선언](pintos/include/userprog/process.h#L19) | **부분 구현** |
+| `process_exit()` | 함수 | FD·자식 기록·주소 공간 종료 정리 | [userprog/process.c:564](pintos/userprog/process.c#L564) · [선언](pintos/include/userprog/process.h#L21) | **부분 구현** |
+| `process_fork()` | 함수 | 자식 생성 후 복제 결과 대기 | [userprog/process.c:217](pintos/userprog/process.c#L217) · [선언](pintos/include/userprog/process.h#L18) | **부분 구현** |
+| `process_init()` | 함수 | 새 주소 공간용 초기화 연결 | [userprog/process.c:86](pintos/userprog/process.c#L86) | **미구현** |
+| `process_terminate()` | 함수 | 종료값 저장 후 스레드 종료 | [userprog/process.c:639](pintos/userprog/process.c#L639) · [선언](pintos/include/userprog/process.h#L23) | 구현됨 |
+| `process_wait()` | 함수 | 직접 자식의 종료 결과 한 번 대기 | [userprog/process.c:526](pintos/userprog/process.c#L526) · [선언](pintos/include/userprog/process.h#L20) | 구현됨 |
+| `syscall_handler()` | 함수 | 사용자 RSP 저장·요청 분기; mmap·munmap 미연결 | [userprog/syscall.c:362](pintos/userprog/syscall.c#L362) | **부분 구현** |
+| `uninit_page_copy()` | 함수 | load_info aux 복제·즉시 claim; NULL aux 미지원 | [vm/vm.c:369](pintos/vm/vm.c#L369) | **부분 구현** |
+| `vm_handle_wp()` | 함수 | 쓰기 보호 폴트 처리 — COW Extra | [vm/vm.c:257](pintos/vm/vm.c#L257) | **미구현** |
 | `wait()` (사용자) | 함수 | 사용자 wait 요청 래퍼 | [lib/user/syscall.c:80](pintos/lib/user/syscall.c#L80) · [선언](pintos/include/lib/user/syscall.h#L28) | 구현됨 |
 
 <a id="topic-address"></a>
@@ -420,36 +437,36 @@
 | `struct semaphore` | 구조체 | 카운터와 대기 스레드 목록 | [include/threads/synch.h:8](pintos/include/threads/synch.h#L8) | 정의됨 |
 | `struct thread` | 구조체 | 프로세스 상태와 커널 스택의 소유자 | [include/threads/thread.h:95](pintos/include/threads/thread.h#L95) | 정의됨 |
 | `thread.elem` | 멤버 | 실행·수면·대기 목록의 연결 요소 | [include/threads/thread.h:106](pintos/include/threads/thread.h#L106) | 정의됨 |
-| `thread.magic` | 멤버 | 커널 스택 손상 검사 값 | [include/threads/thread.h:151](pintos/include/threads/thread.h#L151) | 정의됨 |
+| `thread.magic` | 멤버 | 커널 스택 손상 검사 값 | [include/threads/thread.h:152](pintos/include/threads/thread.h#L152) | 정의됨 |
 | `thread.name` | 멤버 | 스레드의 디버깅 이름 | [include/threads/thread.h:99](pintos/include/threads/thread.h#L99) | 정의됨 |
 | `thread.pml4` | 멤버 | 프로세스의 최상위 페이지 테이블 | [include/threads/thread.h:132](pintos/include/threads/thread.h#L132) | 정의됨 |
 | `thread.priority` | 멤버 | 현재 스레드 우선순위 | [include/threads/thread.h:100](pintos/include/threads/thread.h#L100) | 정의됨 |
 | `thread.running_file` | 멤버 | 실행 파일의 쓰기 금지 보유권 | [include/threads/thread.h:142](pintos/include/threads/thread.h#L142) | 정의됨 |
 | `thread.spt` | 멤버 | 프로세스의 보조 페이지 테이블 | [include/threads/thread.h:146](pintos/include/threads/thread.h#L146) | 정의됨 |
 | `thread.status` | 멤버 | 스케줄러 상태; 종료값과 별개 | [include/threads/thread.h:98](pintos/include/threads/thread.h#L98) | 정의됨 |
-| `thread.tf` | 멤버 | 스케줄링용 저장 실행 문맥 | [include/threads/thread.h:150](pintos/include/threads/thread.h#L150) | 정의됨 |
+| `thread.tf` | 멤버 | 스케줄링용 저장 실행 문맥 | [include/threads/thread.h:151](pintos/include/threads/thread.h#L151) | 정의됨 |
 | `thread.tid` | 멤버 | 스레드 식별자 | [include/threads/thread.h:97](pintos/include/threads/thread.h#L97) | 정의됨 |
-| `thread_block()` | 함수 | 현재 스레드를 대기 상태로 변경 | [threads/thread.c:298](pintos/threads/thread.c#L298) · [선언](pintos/include/threads/thread.h#L177) | 구현됨 |
+| `thread_block()` | 함수 | 현재 스레드를 대기 상태로 변경 | [threads/thread.c:298](pintos/threads/thread.c#L298) · [선언](pintos/include/threads/thread.h#L178) | 구현됨 |
 | `THREAD_BLOCKED` | 열거값 | 이벤트나 자원 대기 상태 | [include/threads/thread.h:16](pintos/include/threads/thread.h#L16) | 정의됨 |
-| `thread_create()` | 함수 | 새 스레드와 커널 스택 생성 | [threads/thread.c:219](pintos/threads/thread.c#L219) · [선언](pintos/include/threads/thread.h#L175) | 구현됨 |
-| `thread_current()` | 함수 | 현재 실행 중인 스레드 조회 | [threads/thread.c:341](pintos/threads/thread.c#L341) · [선언](pintos/include/threads/thread.h#L180) | 구현됨 |
+| `thread_create()` | 함수 | 새 스레드와 커널 스택 생성 | [threads/thread.c:219](pintos/threads/thread.c#L219) · [선언](pintos/include/threads/thread.h#L176) | 구현됨 |
+| `thread_current()` | 함수 | 현재 실행 중인 스레드 조회 | [threads/thread.c:341](pintos/threads/thread.c#L341) · [선언](pintos/include/threads/thread.h#L181) | 구현됨 |
 | `THREAD_DYING` | 열거값 | 종료 후 자원 회수 대기 상태 | [include/threads/thread.h:17](pintos/include/threads/thread.h#L17) | 정의됨 |
-| `thread_exit()` | 함수 | 프로세스 정리 후 현재 스레드 종료 | [threads/thread.c:364](pintos/threads/thread.c#L364) · [선언](pintos/include/threads/thread.h#L184) | 구현됨 |
-| `thread_func` | typedef | 새 스레드 시작 함수 타입 | [include/threads/thread.h:174](pintos/include/threads/thread.h#L174) | 정의됨 |
-| `thread_get_priority()` | 함수 | 현재 스레드의 우선순위 조회 | [threads/thread.c:579](pintos/threads/thread.c#L579) · [선언](pintos/include/threads/thread.h#L192) | 구현됨 |
-| `thread_init()` | 함수 | 부팅 초기 스레드 시스템 준비 | [threads/thread.c:118](pintos/threads/thread.c#L118) · [선언](pintos/include/threads/thread.h#L168) | 구현됨 |
+| `thread_exit()` | 함수 | 프로세스 정리 후 현재 스레드 종료 | [threads/thread.c:364](pintos/threads/thread.c#L364) · [선언](pintos/include/threads/thread.h#L185) | 구현됨 |
+| `thread_func` | typedef | 새 스레드 시작 함수 타입 | [include/threads/thread.h:175](pintos/include/threads/thread.h#L175) | 정의됨 |
+| `thread_get_priority()` | 함수 | 현재 스레드의 우선순위 조회 | [threads/thread.c:579](pintos/threads/thread.c#L579) · [선언](pintos/include/threads/thread.h#L193) | 구현됨 |
+| `thread_init()` | 함수 | 부팅 초기 스레드 시스템 준비 | [threads/thread.c:118](pintos/threads/thread.c#L118) · [선언](pintos/include/threads/thread.h#L169) | 구현됨 |
 | `THREAD_MAGIC` | 매크로 | 스레드 구조체·스택 손상 검사 값 | [threads/thread.c:22](pintos/threads/thread.c#L22) | 정의됨 |
-| `thread_name()` | 함수 | 현재 스레드 이름 조회 | [threads/thread.c:333](pintos/threads/thread.c#L333) · [선언](pintos/include/threads/thread.h#L182) | 구현됨 |
-| `thread_print_stats()` | 함수 | 스레드 실행 통계 출력 | [threads/thread.c:198](pintos/threads/thread.c#L198) · [선언](pintos/include/threads/thread.h#L172) | 구현됨 |
+| `thread_name()` | 함수 | 현재 스레드 이름 조회 | [threads/thread.c:333](pintos/threads/thread.c#L333) · [선언](pintos/include/threads/thread.h#L183) | 구현됨 |
+| `thread_print_stats()` | 함수 | 스레드 실행 통계 출력 | [threads/thread.c:198](pintos/threads/thread.c#L198) · [선언](pintos/include/threads/thread.h#L173) | 구현됨 |
 | `THREAD_READY` | 열거값 | 실행 준비 상태 | [include/threads/thread.h:15](pintos/include/threads/thread.h#L15) | 정의됨 |
 | `THREAD_RUNNING` | 열거값 | 현재 CPU에서 실행 중 | [include/threads/thread.h:14](pintos/include/threads/thread.h#L14) | 정의됨 |
-| `thread_set_priority()` | 함수 | 현재 스레드의 기본 우선순위 변경 | [threads/thread.c:543](pintos/threads/thread.c#L543) · [선언](pintos/include/threads/thread.h#L193) | 구현됨 |
-| `thread_start()` | 함수 | idle 스레드 생성과 스케줄러 시작 | [threads/thread.c:158](pintos/threads/thread.c#L158) · [선언](pintos/include/threads/thread.h#L169) | 구현됨 |
+| `thread_set_priority()` | 함수 | 현재 스레드의 기본 우선순위 변경 | [threads/thread.c:543](pintos/threads/thread.c#L543) · [선언](pintos/include/threads/thread.h#L194) | 구현됨 |
+| `thread_start()` | 함수 | idle 스레드 생성과 스케줄러 시작 | [threads/thread.c:158](pintos/threads/thread.c#L158) · [선언](pintos/include/threads/thread.h#L170) | 구현됨 |
 | `enum thread_status` | enum | 스케줄러가 관리하는 스레드 상태 | [include/threads/thread.h:13](pintos/include/threads/thread.h#L13) | 정의됨 |
-| `thread_tick()` | 함수 | 타이머 틱의 실행 시간 통계 처리 | [threads/thread.c:174](pintos/threads/thread.c#L174) · [선언](pintos/include/threads/thread.h#L171) | 구현됨 |
-| `thread_tid()` | 함수 | 현재 스레드 ID 조회 | [threads/thread.c:357](pintos/threads/thread.c#L357) · [선언](pintos/include/threads/thread.h#L181) | 구현됨 |
-| `thread_unblock()` | 함수 | 대기 스레드를 실행 준비로 변경 | [threads/thread.c:316](pintos/threads/thread.c#L316) · [선언](pintos/include/threads/thread.h#L178) | 구현됨 |
-| `thread_yield()` | 함수 | 다른 실행 준비 스레드에 CPU 양보 | [threads/thread.c:387](pintos/threads/thread.c#L387) · [선언](pintos/include/threads/thread.h#L185) | 구현됨 |
+| `thread_tick()` | 함수 | 타이머 틱의 실행 시간 통계 처리 | [threads/thread.c:174](pintos/threads/thread.c#L174) · [선언](pintos/include/threads/thread.h#L172) | 구현됨 |
+| `thread_tid()` | 함수 | 현재 스레드 ID 조회 | [threads/thread.c:357](pintos/threads/thread.c#L357) · [선언](pintos/include/threads/thread.h#L182) | 구현됨 |
+| `thread_unblock()` | 함수 | 대기 스레드를 실행 준비로 변경 | [threads/thread.c:316](pintos/threads/thread.c#L316) · [선언](pintos/include/threads/thread.h#L179) | 구현됨 |
+| `thread_yield()` | 함수 | 다른 실행 준비 스레드에 CPU 양보 | [threads/thread.c:387](pintos/threads/thread.c#L387) · [선언](pintos/include/threads/thread.h#L186) | 구현됨 |
 | `TID_ERROR` | 매크로 | 스레드 생성 실패 식별자 | [include/threads/thread.h:23](pintos/include/threads/thread.h#L23) | 정의됨 |
 | `tid_t` | typedef | 스레드 식별자 타입 | [include/threads/thread.h:22](pintos/include/threads/thread.h#L22) | 정의됨 |
 
@@ -526,6 +543,9 @@
 | `p/a 주소` | GDB 명령 | 주소에 해당하는 심볼 표시 | [사용법](https://casys-kaist.github.io/pintos-kaist/appendix/debugging_tools.html) | 외부 명령 |
 | `disassemble 함수` | GDB 명령 | 함수의 어셈블리 표시 | [사용법](https://casys-kaist.github.io/pintos-kaist/appendix/debugging_tools.html) | 외부 명령 |
 | `info gdb` | 셸 명령 | GDB 매뉴얼 열기 | [사용법](https://casys-kaist.github.io/pintos-kaist/appendix/debugging_tools.html) | 외부 명령 |
+| `make fast` | Make 대상 | VM 병렬 테스트; 기존 결과 삭제·icount 사용 | [Makefile (루트):28](Makefile#L28) | 정의됨 |
+| `make fcheck` | Make 대상 | VM 병렬 테스트; 기존 결과 삭제·icount 없음 | [Makefile (루트):29](Makefile#L29) | 정의됨 |
+| `PINTOS_QEMU_EXTRA` | 환경 변수 | QEMU 실행 시 추가 옵션 전달 | [utils/pintos:139](pintos/utils/pintos#L139) | 정의됨 |
 
 <a id="sources"></a>
 
