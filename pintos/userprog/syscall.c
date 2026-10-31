@@ -1,6 +1,8 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
+#include "hash.h"
+#include "stdbool.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
@@ -19,7 +21,8 @@
 #include "devices/input.h"   /* 표준 입력에서 input_getc를 사용한다. */
 #include <debug.h>           /* NOT_REACHED를 명시적으로 가져온다. */
 #include "threads/init.h" /* [YJH] power_off()로 시스템 전원을 끄기 위해 사용한다. */
-#include <stdint.h>       /* INT32_MAX를 사용한다. */
+#include "vm/vm.h"
+#include <stdint.h> /* INT32_MAX를 사용한다. */
 
 struct lock
     filesys_lock; /* [JE/YYJ] 파일 로딩과 파일 시스템 호출이 함께 사용할 락이다. */
@@ -83,17 +86,26 @@ static bool user_buffer_readable(const void *buffer, size_t size)
     if (pml4 == NULL) {         /* 유효한 사용자 주소 공간이 있는지 확인한다. */
         return false;           /* 조회할 페이지 테이블이 없으면 실패한다. */
     }
-    for (uintptr_t page = (uintptr_t)pg_round_down(buffer); page <= end;
-         page += PGSIZE) { /* 걸친 모든 페이지를 순회한다. */
-        uint64_t *pte = pml4e_walk(
-            pml4, page,
-            0); /* 없던 페이지 테이블을 만들지 않고 PTE를 조회한다. */
-        if (pte == NULL || !(*pte & PTE_P) ||
-            !is_user_pte(
-                pte)) {   /* 존재·현재 매핑·사용자 접근 권한을 확인한다. */
-            return false; /* 하나라도 접근할 수 없으면 전체 범위를 거부한다. */
+
+    /* [SHW] SPT에 해당 페이지가 있는지 확인 및 프레임 할당*/
+    for (uintptr_t upage = (uintptr_t)pg_round_down(buffer); upage <= end;
+         upage += PGSIZE) { /* 걸친 모든 페이지를 검사한다. */
+
+        struct page *page;
+        if ((page = spt_find_page(&thread_current()->spt, (void *)upage))) {
+            if (page->frame != NULL) {
+                continue;
+            }
+            if (!vm_claim_page((void *)upage)) {
+                return false;
+            }
+        } else {
+            if (!stack_growth((void *)upage,
+                              thread_current()->syscall_prev_rsp)) {
+                return false;
+            }
         }
-    } /* 사용자 페이지 검사를 끝낸다. */
+    }
     return true; /* 전체 범위를 읽을 수 있다. */
 }
 
